@@ -1,0 +1,19 @@
+{
+  "name": "checkin-printer",
+  "version": "1.0.0",
+  "description": "ChurchTools Check-In label printer service for Raspberry Pi",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "LOG_LEVEL=debug node src/index.js"
+  },
+  "dependencies": {
+    "@churchtools/churchtools-client": "^1.5.4",
+    "axios-cookiejar-support": "^6.0.5",
+    "dotenv": "^16.4.5",
+    "tough-cookie": "^6.0.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

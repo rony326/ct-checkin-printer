@@ -1,0 +1,22 @@
+[Unit]
+Description=ChurchTools Check-In Printer Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/checkin-printer
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=checkin-printer
+
+# Environment (alternativ direkt hier statt .env)
+# Environment="CT_BASE_URL=https://..."
+# Environment="CT_API_TOKEN=..."
+
+[Install]
+WantedBy=multi-user.target
