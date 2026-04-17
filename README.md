@@ -209,12 +209,25 @@ Definiert wie CT-Felder (linke Seite des Trennzeichens) auf interne Felder gemap
 ```
 
 Das CT-Etikettentemplate muss entsprechend aufgebaut sein:
+
+Etikett für die Eltern
+
 ```
-name={Vorname} {Nachname}
-id={PersonID}
-code={Abholcode}
-group={Gruppenname}
+name=[Spitzname] 
+id=[ID]
+code=[Code]
+group=[Gruppe]
 type=parent
+```
+
+Etikett für das Kind
+
+```
+name=[Spitzname] [Nachname.1]
+id=[ID]
+code=[Code]
+group=[Gruppe]
+type=child
 ```
 
 ---
