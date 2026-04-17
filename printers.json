@@ -4,11 +4,5 @@
     "printerName": "Foyer-Drucker",
     "printerHost": "192.168.1.50",
     "printerPort": 9100
-  },
-  {
-    "hostname":    "kinder",
-    "printerName": "Kinder-Drucker",
-    "printerHost": "192.168.1.51",
-    "printerPort": 9100
   }
 ]

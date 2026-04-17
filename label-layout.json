@@ -1,0 +1,26 @@
+{
+  "parent": {
+    "length_mm": 50,
+    "padding_mm": 2,
+    "line_spacing_mm": 0.8,
+    "blocks": [
+      { "type": "logo", "image": "logo.png", "height_mm": 10, "align": "left", "gap_after_mm": 2 },
+      { "type": "text", "field": "id",    "font_size": 52, "bold": true,  "gap_after_mm": 2 },
+      { "type": "text", "field": "name",  "font_size": 36, "bold": false, "gap_after_mm": 0 },
+      { "type": "text", "field": "code",  "font_size": 36, "bold": false, "gap_after_mm": 2, "prefix": "Abholcode: " },
+      { "type": "text", "field": "group", "font_size": 28, "bold": false, "gap_after_mm": 0 },
+      { "type": "text", "field": "extra", "font_size": 28, "bold": false, "gap_after_mm": 0 }
+    ]
+  },
+  "child": {
+    "length_mm": 50,
+    "padding_mm": 2,
+    "line_spacing_mm": 0.8,
+    "blocks": [
+      { "type": "text", "field": "name",  "font_size": 52, "bold": true,  "gap_after_mm": 2 },
+      { "type": "text", "field": "id",    "font_size": 36, "bold": false, "gap_after_mm": 0 },
+      { "type": "text", "field": "code",  "font_size": 36, "bold": false, "gap_after_mm": 2, "prefix": "Abholcode: " },
+      { "type": "text", "field": "group", "font_size": 28, "bold": false, "gap_after_mm": 0 }
+    ]
+  }
+}

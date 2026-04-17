@@ -1,0 +1,13 @@
+{
+  "separator": "=",
+  "fields": {
+    "name":  "name",
+    "id":    "id",
+    "code":  "code",
+    "group": "group",
+    "type":  "type",
+    "extra": "extra"
+  },
+  "parent_value": "parent",
+  "child_value":  "child"
+}

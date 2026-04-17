@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Environment (enthält Passwörter!)
+.env
+
+# Dry-Run Vorschauen
+label_preview_*.png
+
+# Job-Dumps
+job-dump.json
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

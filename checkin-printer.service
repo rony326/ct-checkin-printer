@@ -14,9 +14,5 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=checkin-printer
 
-# Environment (alternativ direkt hier statt .env)
-# Environment="CT_BASE_URL=https://..."
-# Environment="CT_API_TOKEN=..."
-
 [Install]
 WantedBy=multi-user.target
