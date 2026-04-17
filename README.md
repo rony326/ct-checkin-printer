@@ -54,7 +54,7 @@
 
 ```bash
 # 1. Repository klonen
-git clone https://github.com/dein-name/churchtools-checkin-printer
+git clone https://github.com/rony326/ct-checkin-printer
 cd churchtools-checkin-printer
 
 # 2. Node-Abhängigkeiten
