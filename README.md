@@ -140,7 +140,7 @@ ACTIVE_TIMES=Mo-So:00:00-23:59    # immer aktiv
 ]
 ```
 
-> `hostname` muss exakt dem Standort-Namen in ChurchTools entsprechen (Gross-/Kleinschreibung beachten).
+> `hostname` entspricht dem Rechnernamen, kann aber Frei gewählt werden.
 
 ---
 
@@ -266,7 +266,7 @@ type=child
       "label_type":     "parent",
       "unix_timestamp": 1713355078,
       "qr_hash":        "a3f8c2d4e1b9...",
-      "fields": { "name": "Noa Jaël", "id": "2693", "code": "ZRYK", "group": "Kids", "type": "parent" }
+      "fields": { "name": "Max Muster", "id": "2693", "code": "ZRYK", "group": "Kids", "type": "parent" }
     }
   ]
 }
@@ -341,7 +341,6 @@ Jeder Drucker hat seinen eigenen unabhängigen Modus.
 ```bash
 LOG_LEVEL=debug npm start
 # Prüfe: activatePrinter success: true?
-# hostname in printers.json muss exakt dem CT-Standort entsprechen
 ```
 
 **TCP-Verbindung testen**
