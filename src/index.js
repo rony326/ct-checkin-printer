@@ -15,34 +15,43 @@ async function main() {
   logger.info(`Label-Typ : ${config.LABEL_TYPE}`);
   logger.info(`Dry-Run   : ${config.DRY_RUN}`);
 
-  // Drucker laden
+  // Drucker laden (globale ACTIVE_TIMES als Fallback)
   let printers;
   try {
-    printers = loadPrinters(config.PRINTERS_FILE);
+    printers = loadPrinters(config.PRINTERS_FILE, config.ACTIVE_TIMES);
   } catch (err) {
     logger.error('printers.json Fehler:', err.message);
     process.exit(1);
   }
-  logger.info(`${printers.length} Drucker geladen`);
 
-  // Login
+  logger.info(`${printers.length} Drucker geladen`);
+  printers.forEach(p => {
+    const schedule = p.activeTimesRaw
+      ? `Zeitfenster: ${p.activeTimesRaw}`
+      : config.ACTIVE_TIMES
+        ? `Zeitfenster: global (${process.env.ACTIVE_TIMES})`
+        : 'Zeitfenster: immer aktiv';
+    logger.info(`  • ${p.printerName} (${p.hostname}) → ${p.printerHost}:${p.printerPort} | ${schedule}`);
+  });
+
+  // Einmaliger Test-Login beim Start zur Credential-Prüfung
   const client = new ChurchToolsClient(config.CT_BASE_URL, config.CT_USERNAME, config.CT_PASSWORD);
   try {
-    await client.login();
+    await client.testLogin();
   } catch (err) {
-    logger.error('Login fehlgeschlagen — Abbruch');
+    logger.error('Credentials ungültig — Abbruch');
     process.exit(1);
   }
 
   // Webhook
   const webhook = new WebhookService(config);
   if (webhook.enabled) {
-    logger.info(`Webhook: ${config.WEBHOOK_URL} | Retries: ${config.WEBHOOK_RETRY} | blockierend: ${config.WEBHOOK_BLOCK_PRINT}`);
+    logger.info(`Webhook: ${webhook.targets.length} Ziel(e) aktiv`);
   } else {
-    logger.info('Webhook: deaktiviert (WEBHOOK_URL nicht gesetzt)');
+    logger.info('Webhook: deaktiviert');
   }
 
-  // Poller pro Drucker
+  // Poller pro Drucker — jeder mit eigenem activeTimes
   const pollers = printers.map(p => {
     const manager = new PrinterManager(p.printerHost, p.printerPort, config);
     const pollerConfig = {
@@ -50,6 +59,7 @@ async function main() {
       HOSTNAME:     p.hostname,
       PRINTER_NAME: p.printerName,
       PRINTER_HOST: p.printerHost,
+      ACTIVE_TIMES: p.activeTimes,  // drucker-spezifisch (oder global als Fallback)
     };
     return { def: p, manager, poller: new JobPoller(client, manager, pollerConfig, webhook) };
   });
@@ -59,7 +69,7 @@ async function main() {
     logger.info(`${signal} — fahre herunter...`);
     await Promise.all(pollers.map(async ({ poller, def }) => {
       await poller.stop();
-      if (isActiveNow(config.ACTIVE_TIMES)) {
+      if (isActiveNow(def.activeTimes)) {
         await client.hidePrinter(def.hostname);
         logger.info(`Drucker abgemeldet: ${def.hostname}`);
       }
@@ -71,11 +81,10 @@ async function main() {
   process.on('SIGINT',  () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  // Drucker aktivieren und Polling starten
-  const activeNow = isActiveNow(config.ACTIVE_TIMES);
-
+  // Drucker aktivieren wenn Zeitfenster gerade offen, dann Polling starten
   await Promise.all(pollers.map(async ({ def, poller }) => {
-    if (activeNow) {
+    if (isActiveNow(def.activeTimes)) {
+      await client.ensureLogin();
       const r = await client.activatePrinter(def.hostname, def.printerName);
       if (!r.success) logger.error(`activatePrinter "${def.hostname}": ${r.message}`);
       else            logger.info(`✅ "${def.printerName}" (${def.hostname}) → ${def.printerHost}:${def.printerPort}`);

@@ -1,8 +1,16 @@
 [
   {
-    "hostname":    "foyer",
+    "hostname": "foyer",
     "printerName": "Foyer-Drucker",
     "printerHost": "192.168.1.50",
-    "printerPort": 9100
+    "printerPort": 9100,
+    "active_times": "So:09:00-13:00 18:00-20:00"
+  },
+  {
+    "hostname": "kinder",
+    "printerName": "Kinder-Drucker",
+    "printerHost": "192.168.1.51",
+    "printerPort": 9100,
+    "active_times": "So:09:00-12:00"
   }
 ]

@@ -154,6 +154,8 @@ class JobPoller {
     const printerName = this.config.PRINTER_NAME || hostname;
 
     if (prevMode === 'sleeping' && newMode !== 'sleeping') {
+      // Session sicherstellen + Renewal starten
+      await this.client.ensureLogin();
       logger.info(`🔔 Zeitfenster geöffnet — melde Drucker an: "${printerName}"`);
       const r = await this.client.activatePrinter(hostname, printerName);
       if (r.success) logger.info(`✅ Drucker angemeldet: "${printerName}"`);
@@ -165,6 +167,8 @@ class JobPoller {
       const r = await this.client.hidePrinter(hostname);
       if (r.success) logger.info(`✅ Drucker abgemeldet: "${printerName}"`);
       else           logger.error(`Drucker-Abmeldung fehlgeschlagen: ${r.message}`);
+      // Renewal pausieren wenn kein Drucker mehr aktiv
+      this.client.onWindowClose();
     }
 
     if (newMode === 'sleeping') {
