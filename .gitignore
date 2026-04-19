@@ -16,3 +16,6 @@ job-dump.json
 # OS
 .DS_Store
 Thumbs.db
+-e 
+# Logfiles
+logs/

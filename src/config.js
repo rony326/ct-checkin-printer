@@ -45,6 +45,11 @@ module.exports = {
   WEBHOOK_RETRY_MS:    process.env.WEBHOOK_RETRY_MS     || '2000',
   WEBHOOK_BLOCK_PRINT: process.env.WEBHOOK_BLOCK_PRINT  || 'false',
 
+  // Logging & Logfiles
+  LOG_TO_FILE:        process.env.LOG_TO_FILE         || 'true',
+  LOG_DIR:            process.env.LOG_DIR              || './logs',
+  LOG_RETENTION_DAYS: process.env.LOG_RETENTION_DAYS  || '14',
+
   // Fehlerbehandlung
   MAX_ERRORS:         parseInt(process.env.MAX_ERRORS || '10', 10),
 };
