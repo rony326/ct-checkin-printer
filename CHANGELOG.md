@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.2.0-beta.1 — Config Refactor & Session Management
+
+### ⚠️ Breaking Changes
+- `printers.json`, `webhooks.json` und `field-mapping.json` wurden in `config.js` zusammengeführt und können gelöscht werden
+- `.env` enthält nur noch Secrets (`CT_BASE_URL`, `CT_USERNAME`, `CT_PASSWORD`) und Umgebungsvariablen (`LOG_LEVEL`, `DRY_RUN`)
+
+### ✨ Neu
+- **`config.js`** — zentrale Konfigurationsdatei als JS-Modul mit inline Kommentaren
+  - Polling, Drucker, Webhooks, Field-Mapping und Logging in einer Datei
+  - Kann sicher in Git eingecheckt werden (keine Secrets)
+- **Zeitfenster je Drucker** (#3) — `activeTimes` pro Drucker in `config.js`, überschreibt globales Zeitfenster
+- **Session Management** (#1) — Login nur bei aktivem Zeitfenster
+  - Einmaliger Test-Login beim Dienststart zur Credential-Prüfung
+  - Session wird automatisch alle 23h erneuert solange ein Drucker aktiv ist
+  - Bei Zeitfenster-Wechsel wird Session gezielt gestartet/pausiert
+  - Automatischer Re-Login bei 401 Unauthorized
+
+### 🐛 Fixes
+- **Debug-Logs** (#5) — `LOG_LEVEL=debug` wurde nicht korrekt ausgewertet (dotenv Timing-Problem)
+
+### 📝 Änderungen
+- **Logfiles** (#2) — tägliche Rotation (`logs/YYYY-MM-DD.log`), konfigurierbare Retention
+- `config.js` zeigt Druckernamen in CT korrekt als `Minis (B2)` — `printerName (hostname)`
+
+### 🗑️ Entfernt
+- `printers.json` → jetzt in `config.js` unter `printers`
+- `webhooks.json` → jetzt in `config.js` unter `webhooks`
+- `field-mapping.json` → jetzt in `config.js` unter `fieldMapping`
+
+### 📦 Migration von v1.1.0
+1. `config.js` aus diesem Release als Vorlage nehmen
+2. Werte aus `printers.json`, `webhooks.json` und `field-mapping.json` übertragen
+3. Alte Dateien löschen
+4. `.env` auf Secrets reduzieren (alle anderen Werte sind jetzt in `config.js`) 
+
 ## [1.1.0] — 2026-04-17
 
 ### Neu

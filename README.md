@@ -12,10 +12,8 @@
 - [Installation](#installation)
 - [Konfiguration](#konfiguration)
   - [.env](#env)
-  - [printers.json](#printersjson)
+  - [config.js](#configjs)
   - [label-layout.json](#label-layoutjson)
-  - [field-mapping.json](#field-mappingjson)
-  - [webhooks.json](#webhooksjson)
 - [Starten](#starten)
 - [Systemdienst](#systemdienst-autostart)
 - [Diagnose](#diagnose)
@@ -31,9 +29,10 @@
 |---|---|
 | 🖨️ | **Mehrere Drucker** gleichzeitig — ein unabhängiger Poller pro Gerät |
 | ⚡ | **Adaptives Polling** — langsam im Ruhemodus, schnell nach einem Job |
-| 🕐 | **Zeitfenster** — Drucker wird automatisch an/abgemeldet beim Öffnen/Schliessen |
+| 🕐 | **Zeitfenster** — pro Drucker konfigurierbar, An/Abmeldung automatisch |
+| 🔑 | **Session-Management** — Login nur bei aktivem Zeitfenster, automatische Renewal alle 23h |
 | 🔖 | **Flexibles Layout** — Schriftgrösse, Ausrichtung, Logo, QR-Code via JSON konfigurierbar |
-| 🔑 | **QR-Code** — SHA1-Hash aus ID, Code und Timestamp auf dem Etikett |
+| 📱 | **QR-Code** — SHA1-Hash aus ID, Code und Timestamp auf dem Etikett |
 | 🔗 | **Webhooks** — POST/PUT an beliebig viele Ziele nach jedem Check-In |
 | 🔄 | **Exponential Backoff** bei API-Fehlern |
 | ✅ | **Graceful Shutdown** — Drucker werden in ChurchTools sauber abgemeldet |
@@ -55,7 +54,7 @@
 ```bash
 # 1. Repository klonen
 git clone https://github.com/rony326/ct-checkin-printer
-cd churchtools-checkin-printer
+cd ct-checkin-printer
 
 # 2. Node-Abhängigkeiten
 npm install
@@ -66,13 +65,8 @@ pip3 install brother_ql qrcode pillow --break-system-packages
 
 # 4. Konfiguration
 cp .env.example .env
-nano .env
-
-# 5. Drucker definieren
-nano printers.json
-
-# 6. Webhooks definieren (optional)
-nano webhooks.json
+nano .env        # CT_BASE_URL, CT_USERNAME, CT_PASSWORD eintragen
+nano config.js   # Drucker, Zeitfenster, Webhooks konfigurieren
 ```
 
 ---
@@ -81,80 +75,146 @@ nano webhooks.json
 
 ### .env
 
+Enthält ausschliesslich Secrets und Umgebungsvariablen — **nie in Git einchecken**.
+
 ```ini
-# ── ChurchTools ───────────────────────────────────────────────
+# ChurchTools Zugangsdaten
 CT_BASE_URL=https://meinegemeinde.church.tools
 CT_USERNAME=drucker@meinegemeinde.de
 CT_PASSWORD=sicheresPasswort
 
-# ── Drucker & Layout ──────────────────────────────────────────
-PRINTERS_FILE=./printers.json
-LABEL_TYPE=54                      # brother_ql Label-Identifier
-LAYOUT_FILE=./label-layout.json
-MAPPING_FILE=./field-mapping.json
-# DRY_RUN=true                     # Nur PNG rendern, nicht drucken
+# Log-Level: debug | info | warn | error (Standard: info)
+LOG_LEVEL=info
 
-# ── Polling ───────────────────────────────────────────────────
-POLL_IDLE_MS=15000                 # Intervall ohne aktiven Job
-POLL_ACTIVE_MS=5000                # Intervall nach erkanntem Job
-POLL_ACTIVE_TTL_MS=300000          # Aktiv-Modus Dauer nach letztem Job (5min)
+# Nur PNG rendern, nicht drucken (Standard: false)
+# DRY_RUN=true
 
-# ── Zeitfenster ───────────────────────────────────────────────
-# ACTIVE_TIMES=So:09:00-12:00 18:00-20:00
+# Logfiles deaktivieren (Standard: true)
+# LOG_TO_FILE=true
 
-# ── Fehlerbehandlung & Logging ────────────────────────────────
-MAX_ERRORS=10
-LOG_LEVEL=info                     # debug | info | warn | error
-
-# ── Webhook ───────────────────────────────────────────────────
-# WEBHOOKS_FILE=./webhooks.json
-# WEBHOOKS_ENABLED=true            # false = alle Webhooks deaktivieren
-# WEBHOOK_RETRY=3
-# WEBHOOK_RETRY_MS=2000
-# WEBHOOK_BLOCK_PRINT=false        # true = Druck wartet auf Webhook
-```
-
-#### ACTIVE_TIMES Format
-
-Tagkürzel: `Mo` `Di`/`Tu` `Mi`/`We` `Do`/`Th` `Fr` `Sa` `So`/`Su` — Bereiche wie `Mo-Fr` werden expandiert.
-
-```ini
-ACTIVE_TIMES=So:09:00-12:00
-ACTIVE_TIMES=So:09:00-12:00 18:00-20:00
-ACTIVE_TIMES=Mo-Fr:08:00-17:00,So:09:00-12:00
-ACTIVE_TIMES=Mo-So:00:00-23:59    # immer aktiv
+# Alternativer Pfad zur Konfigurationsdatei (Standard: ./config.js)
+# CONFIG_FILE=./config.js
 ```
 
 ---
 
-### printers.json
+### config.js
 
-```json
-[
-  {
-    "hostname":    "foyer",
-    "printerName": "Foyer-Drucker",
-    "printerHost": "192.168.1.50",
-    "printerPort": 9100
-  }
-]
+Zentrale Konfigurationsdatei — kann sicher in Git eingecheckt werden.
+Alle Optionen sind inline kommentiert.
+
+```javascript
+module.exports = {
+
+  polling: {
+    idleMs: 15000,        // Intervall im Ruhemodus
+    activeMs: 5000,       // Intervall nach erkanntem Job
+    activeTtlMs: 300000,  // Aktiv-Modus Dauer nach letztem Job (5min)
+    activeTimes: 'So:09:00-13:00',  // Globales Zeitfenster (leer = immer aktiv)
+    maxErrors: 10,
+  },
+
+  printer: {
+    labelType: '54',                    // 54mm Endlosband
+    layoutFile: './label-layout.json',
+    timeoutMs: 5000,
+  },
+
+  fieldMapping: {
+    separator: '=',
+    fields: { name: 'name', id: 'id', code: 'code', group: 'group', type: 'type' },
+    parentValue: 'parent',
+    childValue: 'child',
+  },
+
+  logging: {
+    dir: './logs',          // Logfile-Verzeichnis
+    retentionDays: 14,      // Aufbewahrung in Tagen
+  },
+
+  printers: [
+    {
+      hostname: 'B2',           // Technischer Bezeichner / Raumnummer
+      printerName: 'Minis',     // Anzeigename — erscheint in CT als "Minis (B2)"
+      printerHost: '192.168.1.50',
+      printerPort: 9100,
+      activeTimes: 'So:09:00-12:00 18:00-20:00',  // drucker-spezifisches Zeitfenster
+    },
+    {
+      hostname: 'A1',
+      printerName: 'Foyer',
+      printerHost: '192.168.1.51',
+      printerPort: 9100,
+      // activeTimes nicht gesetzt → globales Zeitfenster wird verwendet
+    },
+  ],
+
+  webhooks: [
+    { name: 'Prod', url: 'https://meinserver.ch/webhook', method: 'POST',
+      secret: 'token', retry: 3, retryMs: 2000, enabled: true },
+    { name: 'Dev',  url: 'https://dev.meinserver.ch/webhook', method: 'POST',
+      enabled: false },
+  ],
+
+  webhookOptions: {
+    blockPrint: false,  // true = Druck wartet auf Webhook
+  },
+};
 ```
 
-> `hostname` entspricht dem Rechnernamen, kann aber Frei gewählt werden.
+#### Drucker — hostname vs. printerName
+
+In ChurchTools erscheint der Drucker als **`printerName (hostname)`**, z.B. `Minis (B2)`.
+
+| Feld | Bedeutung | Beispiel |
+|---|---|---|
+| `hostname` | Technischer Bezeichner / Raumnummer — von CT intern verwendet | `B2` |
+| `printerName` | Anzeigename / Raumname | `Minis` |
+
+#### Zeitfenster — activeTimes Format
+
+Tagkürzel: `Mo` `Di`/`Tu` `Mi`/`We` `Do`/`Th` `Fr` `Sa` `So`/`Su` — Bereiche wie `Mo-Fr` werden expandiert.
+
+```javascript
+activeTimes: 'So:09:00-12:00'                        // Sonntag, ein Fenster
+activeTimes: 'So:09:00-12:00 18:00-20:00'            // Sonntag, zwei Fenster
+activeTimes: 'Mo-Fr:08:00-17:00,So:09:00-12:00'      // Werktags + Sonntag
+activeTimes: ''                                       // immer aktiv
+// activeTimes: null                                  // immer aktiv (ignoriert globales)
+```
+
+#### Webhook-Payload
+
+```json
+{
+  "event": "checkin.printed",
+  "timestamp": 1713355078,
+  "printer": { "hostname": "B2", "name": "Minis", "host": "192.168.1.50" },
+  "labels": [
+    {
+      "ct_job_id": "683",
+      "label_type": "parent",
+      "unix_timestamp": 1713355078,
+      "qr_hash": "a3f8c2d4e1b9...",
+      "fields": { "name": "Max Muster", "id": "2693", "code": "ZRYK", "group": "Kids", "type": "parent" }
+    }
+  ]
+}
+```
 
 ---
 
 ### label-layout.json
 
-Definiert Layout und Inhalt für `parent`- und `child`-Etiketten.
+Definiert Layout und Inhalt für `parent`- und `child`-Etiketten. Bleibt als separate Datei — wird häufiger angepasst als die restliche Konfiguration.
 
 **Block-Typen:**
 
 | type | Felder | Beschreibung |
 |---|---|---|
 | `text` | `field`, `font_size`, `bold`, `align`, `prefix`, `gap_after_mm` | Textfeld aus CT-Daten |
-| `logo` | `image`, `height_mm`, `align`, `gap_after_mm` | Bilddatei |
-| `qr`   | `size_mm`, `align`, `gap_after_mm` | QR-Code aus SHA1-Hash |
+| `logo` | `image`, `height_mm`, `align`, `gap_after_mm` | Bilddatei (PNG/JPG) |
+| `qr` | `size_mm`, `align`, `gap_after_mm` | QR-Code aus SHA1-Hash |
 
 **Verfügbare Felder:** `name` `id` `code` `group` `extra`
 
@@ -179,96 +239,10 @@ Definiert Layout und Inhalt für `parent`- und `child`-Etiketten.
     "padding_mm": 2,
     "line_spacing_mm": 0.8,
     "blocks": [
-      { "type": "text", "field": "name", "font_size": 52, "bold": true,  "gap_after_mm": 2 },
-      { "type": "text", "field": "code", "font_size": 36, "bold": false, "gap_after_mm": 0, "prefix": "Abholcode: " }
+      { "type": "text", "field": "name", "font_size": 52, "bold": true,  "align": "left", "gap_after_mm": 2 },
+      { "type": "text", "field": "code", "font_size": 36, "bold": false, "align": "left", "gap_after_mm": 0, "prefix": "Abholcode: " }
     ]
   }
-}
-```
-
----
-
-### field-mapping.json
-
-Definiert wie CT-Felder (linke Seite des Trennzeichens) auf interne Felder gemappt werden.
-
-```json
-{
-  "separator": "=",
-  "fields": {
-    "name":  "name",
-    "id":    "id",
-    "code":  "code",
-    "group": "group",
-    "type":  "type",
-    "extra": "extra"
-  },
-  "parent_value": "parent",
-  "child_value":  "child"
-}
-```
-
-Das CT-Etikettentemplate muss entsprechend aufgebaut sein:
-
-Etikett für die Eltern
-
-```
-name=[Spitzname] 
-id=[ID]
-code=[Code]
-group=[Gruppe]
-type=parent
-```
-
-Etikett für das Kind
-
-```
-name=[Spitzname] [Nachname.1]
-id=[ID]
-code=[Code]
-group=[Gruppe]
-type=child
-```
-
----
-
-### webhooks.json
-
-```json
-[
-  {
-    "name":     "Prod",
-    "url":      "https://prod.ch/checkin/webhook",
-    "method":   "POST",
-    "secret":   "deinToken",
-    "retry":    3,
-    "retry_ms": 2000,
-    "enabled":  true
-  },
-  {
-    "name":     "Dev",
-    "url":      "https://dev.ch/checkin/webhook",
-    "method":   "POST",
-    "enabled":  false
-  }
-]
-```
-
-**Webhook-Payload:**
-```json
-{
-  "event":     "checkin.printed",
-  "timestamp": 1713355078,
-  "printer": { "hostname": "foyer", "name": "Foyer-Drucker", "host": "192.168.1.50" },
-  "labels": [
-    {
-      "ct_job_id":      "683",
-      "label_type":     "parent",
-      "unix_timestamp": 1713355078,
-      "qr_hash":        "a3f8c2d4e1b9...",
-      "fields": { "name": "Max Muster", "id": "2693", "code": "ZRYK", "group": "Kids", "type": "parent" }
-    }
-  ]
 }
 ```
 
@@ -315,7 +289,7 @@ sudo systemctl disable checkin-printer   # Autostart deaktivieren
 node diagnose.js
 ```
 
-Das Script meldet den Drucker an, wartet auf einen Check-In und speichert den rohen Job-Payload in `job-dump.json` — nützlich um das CT-Format zu analysieren ohne den Drucker zu benötigen.
+Meldet den Drucker an, wartet auf einen Check-In und speichert den rohen Job-Payload in `job-dump.json` — nützlich um das CT-Format zu analysieren ohne den Drucker zu benötigen.
 
 ---
 
@@ -323,15 +297,15 @@ Das Script meldet den Drucker an, wartet auf einen Check-In und speichert den ro
 
 | Zustand | Verhalten |
 |---|---|
-| 💤 Ausserhalb Zeitfenster | Schläft, `hidePrinter` wurde aufgerufen. Prüft sekunden-genau wann nächstes Fenster öffnet. |
-| 🔔 Fenster öffnet | `activatePrinter` → Polling startet |
-| 🕐 Innerhalb, kein Job | Polling alle `POLL_IDLE_MS` (Standard: 15s) |
-| ⚡ Job empfangen | Polling alle `POLL_ACTIVE_MS` (Standard: 5s) für `POLL_ACTIVE_TTL_MS` (Standard: 5min) |
-| 🕐 5min ohne Job | Zurück zu `POLL_IDLE_MS` |
-| 🔕 Fenster schliesst | `hidePrinter` → Polling pausiert |
+| 💤 Ausserhalb Zeitfenster | Schläft, `hidePrinter` aufgerufen. Prüft sekunden-genau wann nächstes Fenster öffnet. |
+| 🔔 Fenster öffnet | Session sicherstellen → `activatePrinter` → Polling startet |
+| 🕐 Innerhalb, kein Job | Polling alle `idleMs` (Standard: 15s) |
+| ⚡ Job empfangen | Polling alle `activeMs` (Standard: 5s) für `activeTtlMs` (Standard: 5min) |
+| 🕐 5min ohne Job | Zurück zu `idleMs` |
+| 🔕 Fenster schliesst | `hidePrinter` → Polling pausiert → Session-Renewal pausiert |
 | 🔴 10× Fehler | 60s Pause, dann Neustart |
 
-Jeder Drucker hat seinen eigenen unabhängigen Modus.
+Jeder Drucker hat seinen eigenen unabhängigen Modus. Session-Renewal läuft alle 23h solange mindestens ein Drucker aktiv ist.
 
 ---
 
@@ -341,6 +315,7 @@ Jeder Drucker hat seinen eigenen unabhängigen Modus.
 ```bash
 LOG_LEVEL=debug npm start
 # Prüfe: activatePrinter success: true?
+# hostname in config.js muss eindeutig sein
 ```
 
 **TCP-Verbindung testen**
@@ -371,43 +346,48 @@ curl -X POST https://meinegemeinde.church.tools/api/login \
 ## Architektur
 
 ```
-.env + printers.json + label-layout.json + field-mapping.json + webhooks.json
-      │
-      ▼
-  index.js  —  Login, Drucker aktivieren, Poller starten
-      │
-      ├── JobPoller  ──→  ChurchToolsClient  ──→  ChurchTools oldApi
-      │       │                                   (getNextPrinterJob)
-      │       │
-      │       ├── PrinterManager
-      │       │       │  enrichJobs() → QR-Hash, Timestamp, Felder
-      │       │       │
-      │       │       └──→ print_label.py (Python)
-      │       │                   │  field-mapping.json → parse
-      │       │                   │  label-layout.json  → render
-      │       │                   │  Pillow → PNG
-      │       │                   │  brother_ql → Raster
-      │       │                   └──→ TCP Port 9100 → Labeldrucker
-      │       │
-      │       └── WebhookService  ──→  webhooks.json  ──→  HTTP POST/PUT
-      │
-      ├── JobPoller  ──→ ...  (Drucker 2)
-      └── JobPoller  ──→ ...  (Drucker n)
+.env (Secrets)   config.js (Konfiguration)   label-layout.json
+      │                    │                          │
+      └────────────────────┼──────────────────────────┘
+                           ▼
+                       index.js
+                           │
+          ┌────────────────┼────────────────┐
+          ▼                ▼                ▼
+      JobPoller      JobPoller        JobPoller
+      (Drucker 1)    (Drucker 2)      (Drucker n)
+          │
+          ├──→ ChurchToolsClient ──→ ChurchTools oldApi
+          │         │                (getNextPrinterJob)
+          │         └── Session-Renewal alle 23h
+          │
+          ├──→ PrinterManager
+          │         │  enrichJobs() → QR-Hash, Timestamp
+          │         └──→ print_label.py
+          │                   │  label-layout.json → render
+          │                   │  Pillow → PNG
+          │                   │  brother_ql → Raster
+          │                   └──→ TCP 9100 → Labeldrucker
+          │
+          └──→ WebhookService ──→ HTTP POST/PUT (parallel)
 ```
 
 ### Dateien
 
 | Datei | Aufgabe |
 |---|---|
+| `config.js` | Zentrale Konfiguration (Drucker, Webhooks, Polling, Mapping) |
+| `label-layout.json` | Etikett-Layout (Blöcke, Schriften, Logo, QR-Code) |
+| `.env` | Secrets (CT-Credentials, Log-Level) |
 | `src/index.js` | Einstiegspunkt |
-| `src/config.js` | `.env` laden und validieren |
-| `src/churchtools-client.js` | Login + oldApi Wrapper |
+| `src/config.js` | Lädt und validiert `.env` + `config.js` |
+| `src/churchtools-client.js` | Login, Session-Management, oldApi |
 | `src/printer-manager.js` | Jobs anreichern, Python aufrufen |
 | `src/job-poller.js` | Polling-Loop, Zeitfenster, Webhook auslösen |
-| `src/schedule.js` | `ACTIVE_TIMES` parsen und auswerten |
+| `src/schedule.js` | Zeitfenster parsen und auswerten |
 | `src/webhook-service.js` | Webhooks senden mit Retry |
-| `src/printers-config.js` | `printers.json` laden |
-| `src/logger.js` | Logging mit Timestamps |
+| `src/printers-config.js` | Drucker-Liste aus config.js laden |
+| `src/logger.js` | Logging mit Timestamps und Datei-Rotation |
 | `print_label.py` | Text → PNG → Brother Raster → TCP |
 | `diagnose.js` | Anmeldung testen, Job-Format erfassen |
 
