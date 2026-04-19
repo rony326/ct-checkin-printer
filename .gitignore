@@ -1,21 +1,19 @@
 # Dependencies
 node_modules/
 
-# Environment (enthält Passwörter!)
+# Environment (enthält Passwörter — nie in Git!)
 .env
 
 # Dry-Run Vorschauen
 label_preview_*.png
 
-# Job-Dumps
+# Job-Dumps (Diagnose-Script)
 job-dump.json
 
-# Logs
+# Logfiles
+logs/
 *.log
 
 # OS
 .DS_Store
 Thumbs.db
--e 
-# Logfiles
-logs/

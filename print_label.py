@@ -32,7 +32,8 @@ parser.add_argument('--host',    required=True)
 parser.add_argument('--port',    default=9100, type=int)
 parser.add_argument('--label',   default='54')
 parser.add_argument('--layout',  default='label-layout.json')
-parser.add_argument('--mapping', default='field-mapping.json')
+parser.add_argument('--mapping',      default='field-mapping.json')
+parser.add_argument('--mapping-json', default=None, help='Field-Mapping als JSON-String (überschreibt --mapping)')
 parser.add_argument('--dry-run', action='store_true')
 args = parser.parse_args()
 
@@ -46,6 +47,13 @@ def load_json(path, default):
         return json.load(f)
 
 def load_mapping():
+    # Inline JSON (aus config.json via Node.js) hat Vorrang vor Datei
+    if args.mapping_json:
+        try:
+            return json.loads(args.mapping_json)
+        except json.JSONDecodeError as e:
+            print('WARNUNG: --mapping-json ungültig: {}'.format(e), file=sys.stderr)
+
     return load_json(args.mapping, {
         "separator": "=",
         "fields": {"name": "name", "id": "id", "code": "code",

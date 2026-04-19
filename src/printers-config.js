@@ -1,76 +1,61 @@
 'use strict';
 
-const fs   = require('fs');
-const path = require('path');
-const { parseActiveTimes } = require('./schedule');
-
 /**
- * Lädt und validiert printers.json.
+ * Lädt und validiert die Drucker-Liste aus config.json (via config.PRINTERS_RAW).
  *
  * Felder pro Eintrag:
- *   hostname     – ChurchTools Standort-ID (Pflicht)
- *   printerName  – Anzeigename in ChurchTools (Pflicht)
- *   printerHost  – IP/Hostname des Druckers (Pflicht)
- *   printerPort  – TCP-Port, Standard: 9100 (optional)
- *   active_times – Zeitfenster nur für diesen Drucker (optional)
- *                  Überschreibt globales ACTIVE_TIMES aus .env
- *                  Format identisch zu ACTIVE_TIMES: "So:09:00-12:00 18:00-20:00"
+ *   hostname     – Technischer Bezeichner / Raumnummer (z.B. "B2")
+ *                  Wird von CT intern genutzt. Angezeigt als "Minis (B2)" in CT.
+ *   printerName  – Anzeigename / Raumname (z.B. "Minis")
+ *   printerHost  – IP-Adresse des Druckers
+ *   printerPort  – TCP-Port (Standard: 9100)
+ *   activeTimes  – Zeitfenster nur für diesen Drucker (optional)
+ *                  Überschreibt globales polling.activeTimes
+ *                  Leer/fehlt = globales Zeitfenster
+ *                  null = immer aktiv (ignoriert globales Zeitfenster)
  */
-function loadPrinters(filePath, globalActiveTimes = null) {
-  const resolved = path.resolve(filePath);
-
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`printers.json nicht gefunden: ${resolved}`);
-  }
-
-  let raw;
-  try {
-    raw = JSON.parse(fs.readFileSync(resolved, 'utf8'));
-  } catch (err) {
-    throw new Error(`printers.json ungültig: ${err.message}`);
-  }
-
+function loadPrinters(raw, globalActiveTimes, parseSchedule) {
   if (!Array.isArray(raw) || raw.length === 0) {
-    throw new Error('printers.json muss ein nicht-leeres Array sein');
+    throw new Error('config.json: "printers" muss ein nicht-leeres Array sein');
   }
 
   const hostnames = new Set();
 
-  return raw.map((entry, i) => {
-    const label = `printers.json[${i}]`;
+  return raw
+    .filter(entry => !entry._comment) // Kommentar-Einträge überspringen
+    .map((entry, i) => {
+      const label = `printers[${i}]`;
 
-    if (!entry.hostname    || typeof entry.hostname    !== 'string') throw new Error(`${label}: "hostname" fehlt`);
-    if (!entry.printerName || typeof entry.printerName !== 'string') throw new Error(`${label}: "printerName" fehlt`);
-    if (!entry.printerHost || typeof entry.printerHost !== 'string') throw new Error(`${label}: "printerHost" fehlt`);
+      if (!entry.hostname    || typeof entry.hostname    !== 'string') throw new Error(`${label}: "hostname" fehlt`);
+      if (!entry.printerName || typeof entry.printerName !== 'string') throw new Error(`${label}: "printerName" fehlt`);
+      if (!entry.printerHost || typeof entry.printerHost !== 'string') throw new Error(`${label}: "printerHost" fehlt`);
 
-    if (hostnames.has(entry.hostname)) {
-      throw new Error(`${label}: hostname "${entry.hostname}" doppelt`);
-    }
-    hostnames.add(entry.hostname);
+      if (hostnames.has(entry.hostname)) {
+        throw new Error(`${label}: hostname "${entry.hostname}" doppelt`);
+      }
+      hostnames.add(entry.hostname);
 
-    // Zeitfenster: drucker-spezifisch überschreibt global
-    let activeTimes = globalActiveTimes;
-    if (entry.active_times !== undefined) {
-      if (entry.active_times === null || entry.active_times === '') {
-        activeTimes = null; // explizit immer aktiv
-      } else {
-        try {
-          activeTimes = parseActiveTimes(entry.active_times);
-        } catch (err) {
-          throw new Error(`${label}: active_times ungültig — ${err.message}`);
+      // Zeitfenster: drucker-spezifisch überschreibt global
+      let activeTimes = globalActiveTimes;
+      if ('activeTimes' in entry) {
+        if (entry.activeTimes === null) {
+          activeTimes = null; // explizit immer aktiv
+        } else if (entry.activeTimes === '' || entry.activeTimes === undefined) {
+          activeTimes = globalActiveTimes; // auf global zurückfallen
+        } else {
+          activeTimes = parseSchedule(entry.activeTimes);
         }
       }
-    }
 
-    return {
-      hostname:    entry.hostname.trim(),
-      printerName: entry.printerName.trim(),
-      printerHost: entry.printerHost.trim(),
-      printerPort: typeof entry.printerPort === 'number' ? entry.printerPort : 9100,
-      activeTimes,          // geparstes Schedule-Objekt (oder null = immer aktiv)
-      activeTimesRaw: entry.active_times ?? null,  // für Logging
-    };
-  });
+      return {
+        hostname:       entry.hostname.trim(),
+        printerName:    entry.printerName.trim(),
+        printerHost:    entry.printerHost.trim(),
+        printerPort:    typeof entry.printerPort === 'number' ? entry.printerPort : 9100,
+        activeTimes,
+        activeTimesRaw: entry.activeTimes ?? null,
+      };
+    });
 }
 
 module.exports = { loadPrinters };

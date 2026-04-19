@@ -27,48 +27,52 @@ class WebhookService {
     this.defaultRetryMs = parseInt(config.WEBHOOK_RETRY_MS || '2000', 10);
 
     this.targets = this.globalEnabled
-      ? this._loadTargets(config.WEBHOOKS_FILE || './webhooks.json')
+      ? this._loadTargets(config.WEBHOOKS_RAW || config.WEBHOOKS_FILE || './webhooks.json')
       : [];
 
     this.enabled = this.targets.length > 0;
   }
 
-  _loadTargets(filePath) {
-    const resolved = path.resolve(filePath);
-
-    if (!fs.existsSync(resolved)) {
-      logger.debug(`webhooks.json nicht gefunden: ${resolved} — Webhook deaktiviert`);
-      return [];
-    }
-
+  _loadTargets(rawOrPath) {
+    // Unterstützt sowohl Array (aus config.json) als auch Dateipfad (Legacy)
     let list;
-    try {
-      list = JSON.parse(fs.readFileSync(resolved, 'utf8'));
-    } catch (err) {
-      logger.error(`webhooks.json ungültig: ${err.message}`);
-      return [];
+
+    if (Array.isArray(rawOrPath)) {
+      list = rawOrPath;
+    } else {
+      const resolved = path.resolve(rawOrPath);
+      if (!fs.existsSync(resolved)) {
+        logger.debug(`webhooks.json nicht gefunden: ${resolved} — Webhook deaktiviert`);
+        return [];
+      }
+      try {
+        list = JSON.parse(fs.readFileSync(resolved, 'utf8'));
+      } catch (err) {
+        logger.error(`webhooks.json ungültig: ${err.message}`);
+        return [];
+      }
     }
 
     if (!Array.isArray(list)) {
-      logger.error('webhooks.json muss ein Array sein');
+      logger.error('Webhooks muss ein Array sein');
       return [];
     }
 
-    const active = list.filter(t => t.url && t.enabled !== false);
+    const active = list.filter(t => t.url && t.enabled !== false && !t._comment);
 
     if (active.length === 0) {
-      logger.info('Webhook: keine aktiven Einträge in webhooks.json');
+      logger.info('Webhook: keine aktiven Einträge');
       return [];
     }
 
-    logger.info(`Webhook: ${active.length} Ziel(e) geladen aus ${resolved}`);
+    logger.info(`Webhook: ${active.length} Ziel(e) aktiv`);
 
     return active.map(t => ({
       url:     t.url,
       method:  (t.method  || 'POST').toUpperCase(),
       secret:  t.secret   || null,
       retry:   parseInt(t.retry    ?? this.defaultRetry,   10),
-      retryMs: parseInt(t.retry_ms ?? this.defaultRetryMs, 10),
+      retryMs: parseInt(t.retryMs ?? t.retry_ms ?? this.defaultRetryMs, 10),
       name:    t.name || t.url,
     }));
   }

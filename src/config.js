@@ -1,7 +1,10 @@
 'use strict';
 
 require('dotenv').config();
+const path = require('path');
 const { parseActiveTimes } = require('./schedule');
+
+// ── .env (Secrets + Umgebung) ──────────────────────────────────────────────
 
 function required(key) {
   const val = process.env[key];
@@ -9,47 +12,68 @@ function required(key) {
   return val;
 }
 
-let activeTimes = null;
-if (process.env.ACTIVE_TIMES) {
+// ── config.js laden ────────────────────────────────────────────────────────
+
+const CONFIG_FILE = path.resolve(process.env.CONFIG_FILE || './config.js');
+
+let cfg;
+try {
+  cfg = require(CONFIG_FILE);
+} catch (err) {
+  throw new Error(`config.js konnte nicht geladen werden (${CONFIG_FILE}): ${err.message}`);
+}
+
+// ── Zeitfenster parsen ─────────────────────────────────────────────────────
+
+function parseSchedule(raw) {
+  if (!raw || raw.trim() === '') return null;
   try {
-    activeTimes = parseActiveTimes(process.env.ACTIVE_TIMES);
+    return parseActiveTimes(raw);
   } catch (err) {
-    throw new Error(`Ungültiges ACTIVE_TIMES Format: ${err.message}`);
+    throw new Error(`Ungültiges Zeitfenster-Format "${raw}": ${err.message}`);
   }
 }
 
+// ── Export ─────────────────────────────────────────────────────────────────
+
 module.exports = {
-  // ChurchTools
-  CT_BASE_URL:   required('CT_BASE_URL'),
-  CT_USERNAME:   required('CT_USERNAME'),
-  CT_PASSWORD:   required('CT_PASSWORD'),
+  // Secrets aus .env
+  CT_BASE_URL:  required('CT_BASE_URL'),
+  CT_USERNAME:  required('CT_USERNAME'),
+  CT_PASSWORD:  required('CT_PASSWORD'),
 
-  // Drucker & Layout
-  PRINTERS_FILE:      process.env.PRINTERS_FILE  || './printers.json',
-  PRINTER_TIMEOUT_MS: parseInt(process.env.PRINTER_TIMEOUT_MS || '5000', 10),
-  LABEL_TYPE:         process.env.LABEL_TYPE     || '54',
-  LAYOUT_FILE:        process.env.LAYOUT_FILE    || 'label-layout.json',
-  MAPPING_FILE:       process.env.MAPPING_FILE   || 'field-mapping.json',
-  DRY_RUN:            process.env.DRY_RUN        || 'false',
+  // Umgebung aus .env
+  DRY_RUN:     process.env.DRY_RUN     || 'false',
+  LOG_LEVEL:   process.env.LOG_LEVEL   || 'info',
+  LOG_TO_FILE: process.env.LOG_TO_FILE || 'true',
+  CONFIG_FILE: process.env.CONFIG_FILE || './config.js',
 
-  // Polling
-  POLL_IDLE_MS:       parseInt(process.env.POLL_IDLE_MS       || '15000', 10),
-  POLL_ACTIVE_MS:     parseInt(process.env.POLL_ACTIVE_MS     || '5000',  10),
-  POLL_ACTIVE_TTL_MS: parseInt(process.env.POLL_ACTIVE_TTL_MS || '300000', 10),
-  ACTIVE_TIMES:       activeTimes,
+  // Polling (aus config.js)
+  POLL_IDLE_MS:       cfg.polling?.idleMs      ?? 15000,
+  POLL_ACTIVE_MS:     cfg.polling?.activeMs    ?? 5000,
+  POLL_ACTIVE_TTL_MS: cfg.polling?.activeTtlMs ?? 300000,
+  ACTIVE_TIMES:       parseSchedule(cfg.polling?.activeTimes),
+  MAX_ERRORS:         cfg.polling?.maxErrors   ?? 10,
 
-  // Webhook
-  WEBHOOKS_FILE:       process.env.WEBHOOKS_FILE        || './webhooks.json',
-  WEBHOOKS_ENABLED:    process.env.WEBHOOKS_ENABLED     || 'true',
-  WEBHOOK_RETRY:       process.env.WEBHOOK_RETRY        || '3',
-  WEBHOOK_RETRY_MS:    process.env.WEBHOOK_RETRY_MS     || '2000',
-  WEBHOOK_BLOCK_PRINT: process.env.WEBHOOK_BLOCK_PRINT  || 'false',
+  // Drucker & Layout (aus config.js)
+  LABEL_TYPE:         cfg.printer?.labelType  || '54',
+  LAYOUT_FILE:        cfg.printer?.layoutFile || './label-layout.json',
+  PRINTER_TIMEOUT_MS: cfg.printer?.timeoutMs  ?? 5000,
 
-  // Logging & Logfiles
-  LOG_TO_FILE:        process.env.LOG_TO_FILE         || 'true',
-  LOG_DIR:            process.env.LOG_DIR              || './logs',
-  LOG_RETENTION_DAYS: process.env.LOG_RETENTION_DAYS  || '14',
+  // Field-Mapping (aus config.js)
+  FIELD_MAPPING: cfg.fieldMapping || null,
 
-  // Fehlerbehandlung
-  MAX_ERRORS:         parseInt(process.env.MAX_ERRORS || '10', 10),
+  // Logging (aus config.js)
+  LOG_DIR:            cfg.logging?.dir           || './logs',
+  LOG_RETENTION_DAYS: cfg.logging?.retentionDays ?? 14,
+
+  // Drucker-Liste (aus config.js)
+  PRINTERS_RAW: cfg.printers || [],
+
+  // Webhooks (aus config.js)
+  WEBHOOKS_RAW:        cfg.webhooks            || [],
+  WEBHOOK_BLOCK_PRINT: cfg.webhookOptions?.blockPrint ? 'true' : 'false',
+
+  // Interne Hilfsfunktion
+  _parseSchedule: parseSchedule,
 };

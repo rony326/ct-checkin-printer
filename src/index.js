@@ -12,24 +12,29 @@ const config                = require('./config');
 
 async function main() {
   logger.info('🖨️  ChurchTools Check-In Printer Service');
+  logger.info(`Config    : ${config.CONFIG_FILE}`);
   logger.info(`Label-Typ : ${config.LABEL_TYPE}`);
   logger.info(`Dry-Run   : ${config.DRY_RUN}`);
 
-  // Drucker laden (globale ACTIVE_TIMES als Fallback)
+  // Drucker laden aus config.json
   let printers;
   try {
-    printers = loadPrinters(config.PRINTERS_FILE, config.ACTIVE_TIMES);
+    printers = loadPrinters(
+      config.PRINTERS_RAW,
+      config.ACTIVE_TIMES,
+      config._parseSchedule
+    );
   } catch (err) {
-    logger.error('printers.json Fehler:', err.message);
+    logger.error('Drucker-Konfiguration Fehler:', err.message);
     process.exit(1);
   }
 
   logger.info(`${printers.length} Drucker geladen`);
   printers.forEach(p => {
-    const schedule = p.activeTimesRaw
-      ? `Zeitfenster: ${p.activeTimesRaw}`
+    const schedule = p.activeTimesRaw !== null && p.activeTimesRaw !== undefined
+      ? `Zeitfenster: ${p.activeTimesRaw || 'immer aktiv (drucker-spezifisch)'}`
       : config.ACTIVE_TIMES
-        ? `Zeitfenster: global (${process.env.ACTIVE_TIMES})`
+        ? `Zeitfenster: global`
         : 'Zeitfenster: immer aktiv';
     logger.info(`  • ${p.printerName} (${p.hostname}) → ${p.printerHost}:${p.printerPort} | ${schedule}`);
   });
@@ -46,20 +51,20 @@ async function main() {
   // Webhook
   const webhook = new WebhookService(config);
   if (webhook.enabled) {
-    logger.info(`Webhook: ${webhook.targets.length} Ziel(e) aktiv`);
+    logger.info(`Webhook: ${webhook.targets.length} Ziel(e) aktiv | blockierend: ${config.WEBHOOK_BLOCK_PRINT}`);
   } else {
     logger.info('Webhook: deaktiviert');
   }
 
-  // Poller pro Drucker — jeder mit eigenem activeTimes
+  // Poller pro Drucker
   const pollers = printers.map(p => {
     const manager = new PrinterManager(p.printerHost, p.printerPort, config);
     const pollerConfig = {
       ...config,
-      HOSTNAME:     p.hostname,
-      PRINTER_NAME: p.printerName,
-      PRINTER_HOST: p.printerHost,
-      ACTIVE_TIMES: p.activeTimes,  // drucker-spezifisch (oder global als Fallback)
+      HOSTNAME:      p.hostname,
+      PRINTER_NAME:  p.printerName,
+      PRINTER_HOST:  p.printerHost,
+      ACTIVE_TIMES:  p.activeTimes,
     };
     return { def: p, manager, poller: new JobPoller(client, manager, pollerConfig, webhook) };
   });
@@ -81,15 +86,15 @@ async function main() {
   process.on('SIGINT',  () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  // Drucker aktivieren wenn Zeitfenster gerade offen, dann Polling starten
+  // Drucker aktivieren wenn Zeitfenster offen, Polling starten
   await Promise.all(pollers.map(async ({ def, poller }) => {
     if (isActiveNow(def.activeTimes)) {
       await client.ensureLogin();
       const r = await client.activatePrinter(def.hostname, def.printerName);
       if (!r.success) logger.error(`activatePrinter "${def.hostname}": ${r.message}`);
-      else            logger.info(`✅ "${def.printerName}" (${def.hostname}) → ${def.printerHost}:${def.printerPort}`);
+      else            logger.info(`✅ "${def.printerName} (${def.hostname})" → ${def.printerHost}:${def.printerPort}`);
     } else {
-      logger.info(`💤 "${def.printerName}" — ausserhalb Zeitfenster, noch nicht angemeldet`);
+      logger.info(`💤 "${def.printerName} (${def.hostname})" — ausserhalb Zeitfenster`);
     }
     await poller.start();
   }));
