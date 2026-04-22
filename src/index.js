@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
+// dotenv als erstes laden — damit LOG_LEVEL beim ersten logger-Aufruf bereits gesetzt ist
+require('dotenv').config();
+
 const { ChurchToolsClient } = require('./churchtools-client');
 const { PrinterManager }    = require('./printer-manager');
 const { JobPoller }         = require('./job-poller');
