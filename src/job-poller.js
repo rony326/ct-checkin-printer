@@ -1,7 +1,8 @@
 'use strict';
 
-const { logger } = require('./logger');
+const { logger }           = require('./logger');
 const { isActiveNow, msUntilNextWindow } = require('./schedule');
+const { waitForPrinter }   = require('./printer-checker');
 
 class JobPoller {
   constructor(client, printerManager, config, webhookService = null) {
@@ -31,7 +32,7 @@ class JobPoller {
       logger.info('Kein Zeitfenster — pollt immer');
     }
     if (this.webhook?.enabled) {
-      logger.info(`Webhook aktiv: ${this.config.WEBHOOK_URL} | blockierend: ${this.config.WEBHOOK_BLOCK_PRINT}`);
+      logger.info(`Webhook aktiv | blockierend: ${this.config.WEBHOOK_BLOCK_PRINT}`);
     }
 
     this._scheduleNext(0);
@@ -81,7 +82,6 @@ class JobPoller {
 
     const mode = this._currentMode();
 
-    // ── Zeitfenster-Wechsel ───────────────────────────────────────────────────
     if (mode !== this._lastMode) {
       await this._onModeChange(this._lastMode, mode);
       this._lastMode = mode;
@@ -96,7 +96,6 @@ class JobPoller {
       ? this.config.POLL_ACTIVE_MS
       : this.config.POLL_IDLE_MS;
 
-    // ── API-Abfrage ───────────────────────────────────────────────────────────
     try {
       const result = await this.client.getNextPrinterJob(this.config.HOSTNAME);
       if (!result.success) throw new Error(result.message || 'API error');
@@ -109,26 +108,22 @@ class JobPoller {
       }
 
       logger.info('📄 Druckauftrag empfangen');
-
-      // Drucken — gibt angereicherte Jobs zurück
       const enrichedJobs = await this.printer.printJob(jobData);
 
       this._totalPrinted++;
       this._consecutiveErrors = 0;
       this._lastJobAt = Date.now();
 
-      // ── Webhook senden ────────────────────────────────────────────────────
       if (this.webhook?.enabled && enrichedJobs) {
         const printerDef = {
-          hostname:     this.config.HOSTNAME,
-          printerName:  this.config.PRINTER_NAME || this.config.HOSTNAME,
-          printerHost:  this.config.PRINTER_HOST || '',
+          hostname:    this.config.HOSTNAME,
+          printerName: this.config.PRINTER_NAME || this.config.HOSTNAME,
+          printerHost: this.config.PRINTER_HOST || '',
         };
         try {
           await this.webhook.send(enrichedJobs, printerDef);
         } catch (err) {
           logger.error('Webhook fehlgeschlagen:', err.message);
-          // Druck war bereits erfolgreich — nur loggen
         }
       }
 
@@ -151,25 +146,54 @@ class JobPoller {
   async _onModeChange(prevMode, newMode) {
     const hostname    = this.config.HOSTNAME;
     const printerName = this.config.PRINTER_NAME || hostname;
+    const printerHost = this.config.PRINTER_HOST;
+    const printerPort = this.config.PRINTER_PORT || 9100;
 
+    // ── sleeping → aktiv: Drucker-Check + Anmeldung ────────────────────────
     if (prevMode === 'sleeping' && newMode !== 'sleeping') {
-      // Session sicherstellen + Renewal starten
       await this.client.ensureLogin();
+
+      if (printerHost) {
+        const retryMs = this.config.PRINTER_CHECK_RETRY_MS || 30000;
+        const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS || 5000;
+
+        logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
+
+        // Warten bis TCP erreichbar, dann ESC/P Status
+        const status = await waitForPrinter(printerHost, printerPort, retryMs, tcpTimeoutMs);
+
+        if (status.errors.length > 0) {
+          logger.error(`⚠️  Drucker "${printerName}" meldet Fehler: ${status.errors.join(', ')}`);
+          if (this.config.STATUS_WEBHOOK_ENABLED && this.webhook?.enabled) {
+            this._fireStatusWebhook(printerName, hostname, printerHost, printerPort, status);
+          }
+        } else if (status.warnings.length > 0) {
+          logger.warn(`⚠️  Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
+          if (this.config.STATUS_WEBHOOK_ENABLED && this.webhook?.enabled) {
+            this._fireStatusWebhook(printerName, hostname, printerHost, printerPort, status);
+          }
+        } else {
+          logger.info(`✅ Drucker "${printerName}" bereit`);
+          if (status.raw) logger.debug(`Status Bytes: ${status.raw.hex}`);
+        }
+      }
+
       logger.info(`🔔 Zeitfenster geöffnet — melde Drucker an: "${printerName}"`);
       const r = await this.client.activatePrinter(hostname, printerName);
       if (r.success) logger.info(`✅ Drucker angemeldet: "${printerName}"`);
       else           logger.error(`Drucker-Anmeldung fehlgeschlagen: ${r.message}`);
     }
 
+    // ── aktiv → sleeping: Abmeldung ────────────────────────────────────────
     if (prevMode !== 'sleeping' && prevMode !== null && newMode === 'sleeping') {
       logger.info(`🔕 Zeitfenster geschlossen — melde Drucker ab: "${printerName}"`);
       const r = await this.client.hidePrinter(hostname);
       if (r.success) logger.info(`✅ Drucker abgemeldet: "${printerName}"`);
       else           logger.error(`Drucker-Abmeldung fehlgeschlagen: ${r.message}`);
-      // Renewal pausieren wenn kein Drucker mehr aktiv
       this.client.onWindowClose();
     }
 
+    // ── Log ────────────────────────────────────────────────────────────────
     if (newMode === 'sleeping') {
       const ms   = msUntilNextWindow(this.config.ACTIVE_TIMES);
       const info = (ms && ms !== Infinity) ? ` — nächstes Fenster in ${Math.round(ms / 60000)}min` : '';
@@ -181,6 +205,29 @@ class JobPoller {
     } else if (newMode === 'idle' && prevMode === 'active') {
       logger.info(`🕐 Zurück zu Idle-Polling (${this.config.POLL_IDLE_MS}ms)`);
     }
+  }
+
+  _fireStatusWebhook(printerName, hostname, printerHost, printerPort, status) {
+    const payload = {
+      event:     'printer.status',
+      timestamp: Math.floor(Date.now() / 1000),
+      printer: {
+        name:     printerName,
+        hostname,
+        host:     printerHost,
+        port:     printerPort,
+      },
+      status: {
+        reachable: status.reachable,
+        ok:        status.ok,
+        errors:    status.errors,
+        warnings:  status.warnings,
+      },
+    };
+
+    this.webhook._sendToAllTargets(payload).catch(err =>
+      logger.error('Status-Webhook fehlgeschlagen:', err.message)
+    );
   }
 
   _isEmpty(data) {

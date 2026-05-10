@@ -102,6 +102,9 @@ module.exports = {
       // Leer ('') oder Feld weglassen = globales Zeitfenster verwenden.
       // null = immer aktiv (ignoriert auch globales Zeitfenster).
       activeTimes: 'So:09:00-12:00 18:00-20:00',
+      
+      checkRetryIntervalMs: 30000,  // wie oft prüfen wenn offline
+      statusWebhook: true,          // Webhook bei Drucker-Fehler feuern
     },
     {
       hostname: 'A1',
@@ -111,6 +114,9 @@ module.exports = {
 
       // Dieser Drucker nutzt das globale Zeitfenster (polling.activeTimes)
       // activeTimes: '',  // weglassen oder leer lassen
+      // Drucker-Check
+      checkRetryIntervalMs: 30000,  // wie oft prüfen wenn offline
+      statusWebhook: true,          // Webhook bei Drucker-Fehler feuern
     },
   ],
 

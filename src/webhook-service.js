@@ -6,49 +6,32 @@ const fs         = require('fs');
 const path       = require('path');
 const { logger } = require('./logger');
 
-/**
- * WebhookService — sendet den angereicherten Job-Payload an eine oder
- * mehrere konfigurierbare URLs.
- *
- * Konfiguration:
- *   webhooks.json  — Liste der Webhook-Ziele (extern, pro Eintrag konfigurierbar)
- *   .env:
- *     WEBHOOKS_FILE        = ./webhooks.json   (Pfad zur Konfigurationsdatei)
- *     WEBHOOKS_ENABLED     = true              (globaler Schalter)
- *     WEBHOOK_RETRY        = 3                 (globaler Default)
- *     WEBHOOK_RETRY_MS     = 2000
- *     WEBHOOK_BLOCK_PRINT  = false
- */
 class WebhookService {
   constructor(config = {}) {
     this.globalEnabled  = (config.WEBHOOKS_ENABLED  || 'true') === 'true';
     this.blockPrint     = (config.WEBHOOK_BLOCK_PRINT || 'false') === 'true';
     this.defaultRetry   = parseInt(config.WEBHOOK_RETRY    || '3',    10);
     this.defaultRetryMs = parseInt(config.WEBHOOK_RETRY_MS || '2000', 10);
-
-    this.targets = this.globalEnabled
+    this.targets        = this.globalEnabled
       ? this._loadTargets(config.WEBHOOKS_RAW || config.WEBHOOKS_FILE || './webhooks.json')
       : [];
-
     this.enabled = this.targets.length > 0;
   }
 
   _loadTargets(rawOrPath) {
-    // Unterstützt sowohl Array (aus config.json) als auch Dateipfad (Legacy)
     let list;
-
     if (Array.isArray(rawOrPath)) {
       list = rawOrPath;
     } else {
       const resolved = path.resolve(rawOrPath);
       if (!fs.existsSync(resolved)) {
-        logger.debug(`webhooks.json nicht gefunden: ${resolved} — Webhook deaktiviert`);
+        logger.debug(`webhooks nicht gefunden: ${resolved} — Webhook deaktiviert`);
         return [];
       }
       try {
         list = JSON.parse(fs.readFileSync(resolved, 'utf8'));
       } catch (err) {
-        logger.error(`webhooks.json ungültig: ${err.message}`);
+        logger.error(`webhooks ungültig: ${err.message}`);
         return [];
       }
     }
@@ -59,7 +42,6 @@ class WebhookService {
     }
 
     const active = list.filter(t => t.url && t.enabled !== false && !t._comment);
-
     if (active.length === 0) {
       logger.info('Webhook: keine aktiven Einträge');
       return [];
@@ -71,7 +53,7 @@ class WebhookService {
       url:     t.url,
       method:  (t.method  || 'POST').toUpperCase(),
       secret:  t.secret   || null,
-      retry:   parseInt(t.retry    ?? this.defaultRetry,   10),
+      retry:   parseInt(t.retry   ?? this.defaultRetry,   10),
       retryMs: parseInt(t.retryMs ?? t.retry_ms ?? this.defaultRetryMs, 10),
       name:    t.name || t.url,
     }));
@@ -96,46 +78,47 @@ class WebhookService {
     };
   }
 
+  // Check-In Druck-Webhook
   async send(enrichedJobs, printerDef) {
     if (!this.enabled) return;
-
     const payload = this.buildPayload(enrichedJobs, printerDef);
-
     const sends = this.targets.map(target =>
       this._sendToTarget(target, payload)
-        .catch(err => logger.error(`Webhook "${target.name}" endgültig fehlgeschlagen: ${err.message}`))
+        .catch(err => logger.error(`Webhook "${target.name}" fehlgeschlagen: ${err.message}`))
     );
+    if (this.blockPrint) await Promise.all(sends);
+  }
 
-    if (this.blockPrint) {
-      await Promise.all(sends);
-    }
-    // non-blocking: Promises laufen im Hintergrund
+  // Status-Webhook (Drucker-Fehler etc.)
+  async _sendToAllTargets(payload) {
+    if (!this.enabled) return;
+    await Promise.all(
+      this.targets.map(target =>
+        this._sendToTarget(target, payload)
+          .catch(err => logger.error(`Status-Webhook "${target.name}": ${err.message}`))
+      )
+    );
   }
 
   async _sendToTarget(target, payload) {
-    const body = JSON.stringify(payload);
+    // Unterstützt sowohl Objekt (wird serialisiert) als auch vorbereiteten String
+    const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
     let lastError;
 
     for (let attempt = 1; attempt <= target.retry; attempt++) {
       try {
         const statusCode = await this._post(target, body);
-
         if (statusCode >= 200 && statusCode < 300) {
           logger.info(`✅ Webhook "${target.name}" gesendet (HTTP ${statusCode})`);
           return;
         }
-
         lastError = new Error(`HTTP ${statusCode}`);
         logger.warn(`Webhook "${target.name}" Versuch ${attempt}/${target.retry}: HTTP ${statusCode}`);
-
       } catch (err) {
         lastError = err;
         logger.warn(`Webhook "${target.name}" Versuch ${attempt}/${target.retry}: ${err.message}`);
       }
-
-      if (attempt < target.retry) {
-        await this._sleep(target.retryMs);
-      }
+      if (attempt < target.retry) await this._sleep(target.retryMs);
     }
 
     throw new Error(`Nach ${target.retry} Versuchen: ${lastError?.message}`);
@@ -149,9 +132,7 @@ class WebhookService {
         'Content-Length': Buffer.byteLength(body),
         'User-Agent':     'churchtools-checkin-printer/1.0',
       };
-      if (target.secret) {
-        headers['Authorization'] = `Bearer ${target.secret}`;
-      }
+      if (target.secret) headers['Authorization'] = `Bearer ${target.secret}`;
 
       const transport = url.protocol === 'https:' ? https : http;
       const req = transport.request(url, { method: target.method, headers }, res => {
