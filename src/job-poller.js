@@ -140,9 +140,8 @@ class JobPoller {
       logger.error(`Poll-Fehler #${this._consecutiveErrors}: ${err.message}. Retry in ${backoff}ms`);
 
       if (this._consecutiveErrors >= this.config.MAX_ERRORS) {
-        logger.error(`🔴 ${this.config.MAX_ERRORS} Fehler — 60s Pause`);
-        this._consecutiveErrors = 0;
-        this._scheduleNext(60_000);
+        logger.error(`🔴 ${this.config.MAX_ERRORS} Fehler hintereinander — starte Dienst neu (systemd)`);
+        process.exit(1);
       } else {
         this._scheduleNext(backoff);
       }
