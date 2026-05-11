@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.2.0-beta.2] — 2026-05-10
+
+### ✨ Neu
+- **Drucker-Check vor Anmeldung** (#6) — TCP-Ping + ESC/P Status-Request (32 Bytes) vor jedem `activatePrinter`
+  - Wartet automatisch bis Drucker erreichbar ist (konfigurierbar: `checkRetryIntervalMs`)
+  - Erkennt: Band leer, kein Band, Schneidwerk blockiert, Deckel offen
+  - Drucker wird trotz Fehler-Status angemeldet — Fehler wird geloggt und optional per Webhook gemeldet
+- **Status-Webhook** (#11 teilweise) — bei Drucker-Fehler oder Warnung wird ein separater Webhook gefeuert
+  - Event: `printer.status` mit `errors` und `warnings` Array
+  - Pro Drucker konfigurierbar: `statusWebhook: true/false`
+  - Nutzt dieselben Webhook-Ziele wie Check-In Events
+
+### 🐛 Fixes
+- **Fehler-Handling `callOldApi`** — `undefined` Fehlermeldungen behoben durch robuste `_extractMessage()` Methode
+  - Wertet `err.message`, `err.response.data.message`, `err.response.data.translatedMessage` und HTTP-Statuscode aus
+  - Debug-Log zeigt vollständigen Fehler-Kontext für bessere Diagnose
+- **Debug-Logs beim Dienststart** — `require('dotenv').config()` wird jetzt als erstes in `index.js` geladen
+
+### 🔄 Geändert
+- **Automatischer Neustart nach MAX_ERRORS** — statt 60s Pause wird `process.exit(1)` aufgerufen, systemd startet den Dienst automatisch neu
+- **`checkin-printer.service`** — `StartLimitIntervalSec=300` und `StartLimitBurst=5` ergänzt (max. 5 Neustarts in 5 Minuten)
+
+### 📦 Migration von v1.2.0-beta.1
+In `config.js` pro Drucker-Eintrag ergänzen:
+```javascript
+checkRetryIntervalMs: 30000,  // Retry-Intervall wenn Drucker offline
+statusWebhook: true,           // Webhook bei Drucker-Fehler
+```
+In `src/index.js` den `pollerConfig` um folgende Felder ergänzen:
+```javascript
+PRINTER_PORT:           p.printerPort,
+PRINTER_CHECK_RETRY_MS: p.checkRetryIntervalMs,
+STATUS_WEBHOOK_ENABLED: p.statusWebhook,
+```
+
 ## v1.2.0-beta.1 — Config Refactor & Session Management
 
 ### ⚠️ Breaking Changes
