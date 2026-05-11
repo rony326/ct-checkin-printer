@@ -74,6 +74,9 @@ module.exports = {
   WEBHOOKS_RAW:        cfg.webhooks            || [],
   WEBHOOK_BLOCK_PRINT: cfg.webhookOptions?.blockPrint ? 'true' : 'false',
 
+  // Status-Webhooks (aus config.js)
+  STATUS_WEBHOOKS_RAW:  cfg.statusWebhooks      || [],
+
   // Interne Hilfsfunktion
   _parseSchedule: parseSchedule,
 };
