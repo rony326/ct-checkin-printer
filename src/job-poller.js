@@ -135,7 +135,13 @@ class JobPoller {
       logger.error(`Poll-Fehler #${this._consecutiveErrors}: ${err.message}. Retry in ${backoff}ms`);
 
       if (this._consecutiveErrors >= this.config.MAX_ERRORS) {
-        logger.error(`🔴 ${this.config.MAX_ERRORS} Fehler hintereinander — starte Dienst neu (systemd)`);
+        logger.error(`🔴 ${this.config.MAX_ERRORS} Fehler hintereinander — melde Drucker ab und starte neu`);
+        try {
+          await this.client.hidePrinter(this.config.HOSTNAME);
+          logger.info(`Drucker abgemeldet: ${this.config.HOSTNAME}`);
+        } catch (hideErr) {
+          logger.error('Drucker-Abmeldung fehlgeschlagen:', hideErr.message);
+        }
         process.exit(1);
       } else {
         this._scheduleNext(backoff);

@@ -20,30 +20,34 @@ const config                = require('./config');
  */
 async function checkAndActivatePrinter(client, webhook, def, pollerConfig) {
   const { printerHost, printerPort, printerName, hostname,
-          checkRetryIntervalMs, statusWebhook } = def;
+          checkEnabled, checkRetryIntervalMs, statusWebhook } = def;
   const tcpTimeoutMs = pollerConfig.PRINTER_TIMEOUT_MS || 5000;
 
-  // 1. TCP-Ping + ESC/P Status — warten bis erreichbar
-  logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
-  const status = await waitForPrinter(printerHost, printerPort, checkRetryIntervalMs, tcpTimeoutMs);
-
-  // 2. Status auswerten
-  if (status.errors.length > 0) {
-    logger.error(`⚠️  Drucker "${printerName}" meldet Fehler: ${status.errors.join(', ')}`);
-    if (statusWebhook && webhook?.enabled) {
-      _fireStatusWebhook(webhook, printerName, hostname, printerHost, printerPort, status);
-    }
-  } else if (status.warnings.length > 0) {
-    logger.warn(`⚠️  Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
-    if (statusWebhook && webhook?.enabled) {
-      _fireStatusWebhook(webhook, printerName, hostname, printerHost, printerPort, status);
-    }
+  // Drucker-Check überspringen wenn deaktiviert
+  if (!checkEnabled) {
+    logger.info(`⏭️  Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
   } else {
-    logger.info(`✅ Drucker "${printerName}" bereit`);
-    if (status.raw) logger.debug(`Status Bytes: ${status.raw.hex}`);
+    // TCP-Ping + Web-Status — warten bis erreichbar
+    logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
+    const status = await waitForPrinter(printerHost, printerPort, checkRetryIntervalMs, tcpTimeoutMs);
+
+    if (status.errors.length > 0) {
+      logger.error(`⚠️  Drucker "${printerName}" meldet Fehler: ${status.errors.join(', ')}`);
+      if (statusWebhook && webhook?.enabled) {
+        _fireStatusWebhook(webhook, printerName, hostname, printerHost, printerPort, status);
+      }
+    } else if (status.warnings.length > 0) {
+      logger.warn(`⚠️  Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
+      if (statusWebhook && webhook?.enabled) {
+        _fireStatusWebhook(webhook, printerName, hostname, printerHost, printerPort, status);
+      }
+    } else {
+      logger.info(`✅ Drucker "${printerName}" bereit`);
+      if (status.raw) logger.debug(`Web-Status: ${JSON.stringify(status.raw)}`);
+    }
   }
 
-  // 3. Drucker anmelden (auch bei Fehler-Status — warnen aber nicht blockieren)
+  // Drucker anmelden (auch bei Fehler-Status — warnen aber nicht blockieren)
   const r = await client.activatePrinter(hostname, printerName);
   if (r.success) {
     logger.info(`✅ "${printerName} (${hostname})" → ${printerHost}:${printerPort}`);
@@ -91,7 +95,8 @@ async function main() {
       : config.ACTIVE_TIMES
         ? 'Zeitfenster: global'
         : 'Zeitfenster: immer aktiv';
-    logger.info(`  • ${p.printerName} (${p.hostname}) → ${p.printerHost}:${p.printerPort} | ${schedule}`);
+    const check = p.checkEnabled ? 'Check: aktiv' : 'Check: deaktiviert';
+    logger.info(`  • ${p.printerName} (${p.hostname}) → ${p.printerHost}:${p.printerPort} | ${schedule} | ${check}`);
   });
 
   // Test-Login
@@ -116,14 +121,14 @@ async function main() {
     const manager = new PrinterManager(p.printerHost, p.printerPort, config);
     const pollerConfig = {
       ...config,
-      HOSTNAME:                p.hostname,
-      PRINTER_NAME:            p.printerName,
-      PRINTER_HOST:            p.printerHost,
-      PRINTER_PORT:            p.printerPort,
-      ACTIVE_TIMES:            p.activeTimes,
-      PRINTER_CHECK_ENABLED:   p.checkEnabled,
-      PRINTER_CHECK_RETRY_MS:  p.checkRetryIntervalMs,
-      STATUS_WEBHOOK_ENABLED:  p.statusWebhook,
+      HOSTNAME:               p.hostname,
+      PRINTER_NAME:           p.printerName,
+      PRINTER_HOST:           p.printerHost,
+      PRINTER_PORT:           p.printerPort,
+      ACTIVE_TIMES:           p.activeTimes,
+      PRINTER_CHECK_ENABLED:  p.checkEnabled,
+      PRINTER_CHECK_RETRY_MS: p.checkRetryIntervalMs,
+      STATUS_WEBHOOK_ENABLED: p.statusWebhook,
     };
     return { def: p, manager, poller: new JobPoller(client, manager, pollerConfig, webhook) };
   });
@@ -149,7 +154,6 @@ async function main() {
   await Promise.all(pollers.map(async ({ def, poller }) => {
     if (isActiveNow(def.activeTimes)) {
       await client.ensureLogin();
-      // Drucker-Check VOR activatePrinter — wartet bis Drucker erreichbar
       await checkAndActivatePrinter(client, webhook, def, poller.config);
     } else {
       logger.info(`💤 "${def.printerName} (${def.hostname})" — ausserhalb Zeitfenster`);
