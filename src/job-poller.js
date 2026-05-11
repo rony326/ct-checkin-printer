@@ -2,14 +2,15 @@
 
 const { logger }           = require('./logger');
 const { isActiveNow, msUntilNextWindow } = require('./schedule');
-const { waitForPrinter }   = require('./printer-checker');
+const { waitForPrinterReady } = require('./printer-checker');
 
 class JobPoller {
-  constructor(client, printerManager, config, webhookService = null) {
-    this.client   = client;
-    this.printer  = printerManager;
-    this.config   = config;
-    this.webhook  = webhookService;
+  constructor(client, printerManager, config, webhookService = null, statusWebhookService = null) {
+    this.client        = client;
+    this.printer       = printerManager;
+    this.config        = config;
+    this.webhook       = webhookService;
+    this.statusWebhook = statusWebhookService;
 
     this._running           = false;
     this._timer             = null;
@@ -169,17 +170,14 @@ class JobPoller {
         const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS     || 5000;
 
         logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
-        const status = await waitForPrinter(printerHost, printerPort, retryMs, tcpTimeoutMs);
 
-        if (status.errors.length > 0) {
-          logger.error(`⚠️  Drucker "${printerName}" meldet Fehler: ${status.errors.join(', ')}`);
-          if (this.config.STATUS_WEBHOOK_ENABLED && this.webhook?.enabled) {
-            this._fireStatusWebhook(printerName, hostname, printerHost, printerPort, status);
-          }
-        } else if (status.warnings.length > 0) {
+        // Warten bis erreichbar UND fehlerfrei (kritische Fehler blockieren Anmeldung)
+        const status = await waitForPrinterReady(printerHost, printerPort, retryMs, tcpTimeoutMs);
+
+        if (status.warnings.length > 0) {
           logger.warn(`⚠️  Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
-          if (this.config.STATUS_WEBHOOK_ENABLED && this.webhook?.enabled) {
-            this._fireStatusWebhook(printerName, hostname, printerHost, printerPort, status);
+          if (this.statusWebhook?.enabled) {
+            this.statusWebhook.send('printer.warning', { printerName, hostname, printerHost, printerPort }, status);
           }
         } else {
           logger.info(`✅ Drucker "${printerName}" bereit`);
@@ -213,29 +211,6 @@ class JobPoller {
     } else if (newMode === 'idle' && prevMode === 'active') {
       logger.info(`🕐 Zurück zu Idle-Polling (${this.config.POLL_IDLE_MS}ms)`);
     }
-  }
-
-  _fireStatusWebhook(printerName, hostname, printerHost, printerPort, status) {
-    const payload = {
-      event:     'printer.status',
-      timestamp: Math.floor(Date.now() / 1000),
-      printer: {
-        name:     printerName,
-        hostname,
-        host:     printerHost,
-        port:     printerPort,
-      },
-      status: {
-        reachable: status.reachable,
-        ok:        status.ok,
-        errors:    status.errors,
-        warnings:  status.warnings,
-      },
-    };
-
-    this.webhook._sendToAllTargets(payload).catch(err =>
-      logger.error('Status-Webhook fehlgeschlagen:', err.message)
-    );
   }
 
   _isEmpty(data) {

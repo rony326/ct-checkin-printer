@@ -1,45 +1,42 @@
 #!/usr/bin/env node
 'use strict';
 
-// dotenv als erstes laden — damit LOG_LEVEL beim ersten logger-Aufruf bereits gesetzt ist
 require('dotenv').config();
 
-const { ChurchToolsClient } = require('./churchtools-client');
-const { PrinterManager }    = require('./printer-manager');
-const { JobPoller }         = require('./job-poller');
-const { WebhookService }    = require('./webhook-service');
-const { loadPrinters }      = require('./printers-config');
-const { waitForPrinter }    = require('./printer-checker');
-const { isActiveNow }       = require('./schedule');
-const { logger }            = require('./logger');
-const config                = require('./config');
+const { ChurchToolsClient }    = require('./churchtools-client');
+const { PrinterManager }       = require('./printer-manager');
+const { JobPoller }            = require('./job-poller');
+const { WebhookService }       = require('./webhook-service');
+const { StatusWebhookService } = require('./status-webhook-service');
+const { loadPrinters }         = require('./printers-config');
+const { waitForPrinterReady }  = require('./printer-checker');
+const { isActiveNow }          = require('./schedule');
+const { logger }               = require('./logger');
+const config                   = require('./config');
 
 /**
- * Führt den Drucker-Check durch und meldet den Drucker bei CT an.
- * Wird beim Start (wenn Zeitfenster offen) und bei Zeitfenster-Wechsel verwendet.
+ * Drucker-Check + Anmeldung bei CT.
+ * - Kritische Fehler (Band leer, Deckel offen) → warten bis behoben + Webhook
+ * - Warnungen → anmelden + Webhook
+ * - Check deaktiviert → direkt anmelden
  */
-async function checkAndActivatePrinter(client, webhook, def, pollerConfig) {
+async function checkAndActivatePrinter(client, statusWebhook, def, pollerConfig) {
   const { printerHost, printerPort, printerName, hostname,
-          checkEnabled, checkRetryIntervalMs, statusWebhook } = def;
+          checkEnabled, checkRetryIntervalMs } = def;
   const tcpTimeoutMs = pollerConfig.PRINTER_TIMEOUT_MS || 5000;
 
-  // Drucker-Check überspringen wenn deaktiviert
   if (!checkEnabled) {
     logger.info(`⏭️  Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
   } else {
-    // TCP-Ping + Web-Status — warten bis erreichbar
     logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
-    const status = await waitForPrinter(printerHost, printerPort, checkRetryIntervalMs, tcpTimeoutMs);
 
-    if (status.errors.length > 0) {
-      logger.error(`⚠️  Drucker "${printerName}" meldet Fehler: ${status.errors.join(', ')}`);
-      if (statusWebhook && webhook?.enabled) {
-        _fireStatusWebhook(webhook, printerName, hostname, printerHost, printerPort, status);
-      }
-    } else if (status.warnings.length > 0) {
+    // Warten bis Drucker erreichbar UND fehlerfrei
+    const status = await waitForPrinterReady(printerHost, printerPort, checkRetryIntervalMs, tcpTimeoutMs);
+
+    if (status.warnings.length > 0) {
       logger.warn(`⚠️  Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
-      if (statusWebhook && webhook?.enabled) {
-        _fireStatusWebhook(webhook, printerName, hostname, printerHost, printerPort, status);
+      if (statusWebhook?.enabled) {
+        statusWebhook.send('printer.warning', def, status);
       }
     } else {
       logger.info(`✅ Drucker "${printerName}" bereit`);
@@ -47,26 +44,13 @@ async function checkAndActivatePrinter(client, webhook, def, pollerConfig) {
     }
   }
 
-  // Drucker anmelden (auch bei Fehler-Status — warnen aber nicht blockieren)
+  // Drucker anmelden
   const r = await client.activatePrinter(hostname, printerName);
   if (r.success) {
     logger.info(`✅ "${printerName} (${hostname})" → ${printerHost}:${printerPort}`);
   } else {
     logger.error(`activatePrinter "${hostname}": ${r.message}`);
   }
-}
-
-function _fireStatusWebhook(webhook, printerName, hostname, printerHost, printerPort, status) {
-  const payload = {
-    event:     'printer.status',
-    timestamp: Math.floor(Date.now() / 1000),
-    printer:   { name: printerName, hostname, host: printerHost, port: printerPort },
-    status:    { reachable: status.reachable, ok: status.ok,
-                 errors: status.errors, warnings: status.warnings },
-  };
-  webhook._sendToAllTargets(payload).catch(err =>
-    logger.error('Status-Webhook fehlgeschlagen:', err.message)
-  );
 }
 
 async function main() {
@@ -78,11 +62,7 @@ async function main() {
   // Drucker laden
   let printers;
   try {
-    printers = loadPrinters(
-      config.PRINTERS_RAW,
-      config.ACTIVE_TIMES,
-      config._parseSchedule
-    );
+    printers = loadPrinters(config.PRINTERS_RAW, config.ACTIVE_TIMES, config._parseSchedule);
   } catch (err) {
     logger.error('Drucker-Konfiguration Fehler:', err.message);
     process.exit(1);
@@ -92,14 +72,12 @@ async function main() {
   printers.forEach(p => {
     const schedule = p.activeTimesRaw !== null && p.activeTimesRaw !== undefined
       ? `Zeitfenster: ${p.activeTimesRaw || 'immer aktiv (drucker-spezifisch)'}`
-      : config.ACTIVE_TIMES
-        ? 'Zeitfenster: global'
-        : 'Zeitfenster: immer aktiv';
+      : config.ACTIVE_TIMES ? 'Zeitfenster: global' : 'Zeitfenster: immer aktiv';
     const check = p.checkEnabled ? 'Check: aktiv' : 'Check: deaktiviert';
     logger.info(`  • ${p.printerName} (${p.hostname}) → ${p.printerHost}:${p.printerPort} | ${schedule} | ${check}`);
   });
 
-  // Test-Login
+  // Login
   const client = new ChurchToolsClient(config.CT_BASE_URL, config.CT_USERNAME, config.CT_PASSWORD);
   try {
     await client.testLogin();
@@ -108,12 +86,20 @@ async function main() {
     process.exit(1);
   }
 
-  // Webhook
+  // Check-In Webhook (für Druckaufträge)
   const webhook = new WebhookService(config);
   if (webhook.enabled) {
-    logger.info(`Webhook: ${webhook.targets.length} Ziel(e) aktiv | blockierend: ${config.WEBHOOK_BLOCK_PRINT}`);
+    logger.info(`Webhook: ${webhook.targets.length} Ziel(e) aktiv`);
   } else {
     logger.info('Webhook: deaktiviert');
+  }
+
+  // Status-Webhook (für Drucker-Fehler/Warnungen)
+  const statusWebhook = new StatusWebhookService(config);
+  if (statusWebhook.enabled) {
+    logger.info(`Status-Webhook: ${statusWebhook.targets.length} Ziel(e) aktiv`);
+  } else {
+    logger.info('Status-Webhook: deaktiviert');
   }
 
   // Poller pro Drucker
@@ -130,7 +116,7 @@ async function main() {
       PRINTER_CHECK_RETRY_MS: p.checkRetryIntervalMs,
       STATUS_WEBHOOK_ENABLED: p.statusWebhook,
     };
-    return { def: p, manager, poller: new JobPoller(client, manager, pollerConfig, webhook) };
+    return { def: p, manager, poller: new JobPoller(client, manager, pollerConfig, webhook, statusWebhook) };
   });
 
   // Graceful Shutdown
@@ -154,7 +140,7 @@ async function main() {
   await Promise.all(pollers.map(async ({ def, poller }) => {
     if (isActiveNow(def.activeTimes)) {
       await client.ensureLogin();
-      await checkAndActivatePrinter(client, webhook, def, poller.config);
+      await checkAndActivatePrinter(client, statusWebhook, def, poller.config);
     } else {
       logger.info(`💤 "${def.printerName} (${def.hostname})" — ausserhalb Zeitfenster`);
     }

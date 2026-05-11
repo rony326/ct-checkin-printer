@@ -4,6 +4,8 @@ const net        = require('net');
 const http       = require('http');
 const { logger } = require('./logger');
 
+// ── PrinterStatus ─────────────────────────────────────────────────────────────
+
 class PrinterStatus {
   constructor({ reachable, errors, warnings, raw } = {}) {
     this.reachable   = !!reachable;
@@ -22,6 +24,8 @@ class PrinterStatus {
   }
 }
 
+// ── TCP-Ping ──────────────────────────────────────────────────────────────────
+
 function tcpPing(host, port, timeoutMs = 3000) {
   return new Promise(resolve => {
     const socket = new net.Socket();
@@ -32,6 +36,8 @@ function tcpPing(host, port, timeoutMs = 3000) {
     socket.connect(port, host);
   });
 }
+
+// ── Brother Web-Status ────────────────────────────────────────────────────────
 
 function fetchWebStatus(host, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
@@ -65,14 +71,27 @@ function parseWebStatus(html) {
   const info     = {};
 
   // Device Status (CSS-Klasse: moniOk / moniError / moniWarning)
+  // Tracking um Doppelmeldungen zu vermeiden
+  const deviceErrors = new Set();
+
   const statusMatch = html.match(/class="moni\s+(\w+)"[^>]*>([^<]+)</);
   if (statusMatch) {
     const cssClass   = statusMatch[1];
-    const statusText = decodeHtml(statusMatch[2]);
+    const statusText = decodeHtml(statusMatch[2]).trim();
     info.deviceStatus = statusText;
 
-    if (cssClass === 'moniError' || statusText.toUpperCase().includes('ERROR')) {
-      errors.push(`Gerätestatus: ${statusText}`);
+    if (cssClass === 'moniError') {
+      // Spezifische Fehler aus deviceStatus extrahieren statt generisch zu melden
+      const upper = statusText.toUpperCase();
+      if (upper.includes('COVER OPEN'))   { deviceErrors.add('COVER OPEN'); }
+      else if (upper.includes('NO MEDIA')) { deviceErrors.add('NO MEDIA'); }
+      else if (upper.includes('END OF MEDIA') || upper.includes('END OF TAPE')) { deviceErrors.add('END OF MEDIA'); }
+      else if (upper.includes('CUTTER JAM')) { deviceErrors.add('CUTTER JAM'); }
+      else if (upper !== 'READY') {
+        // Unbekannter Fehler — direkt als Fehlermeldung
+        errors.push(`Gerätestatus: ${statusText}`);
+        deviceErrors.add('GENERIC');
+      }
     } else if (cssClass === 'moniWarning') {
       warnings.push(`Gerätestatus: ${statusText}`);
     }
@@ -83,9 +102,8 @@ function parseWebStatus(html) {
   if (mediaMatch) {
     const mediaStatus = decodeHtml(mediaMatch[1]);
     info.mediaStatus = mediaStatus;
-    // Nur exakt 'Empty' ist ein Fehler — 'Not Empty' ist ok
     if (mediaStatus === 'Empty') {
-      errors.push('Band leer');
+      deviceErrors.add('END OF MEDIA');
     }
   }
 
@@ -97,15 +115,28 @@ function parseWebStatus(html) {
   const emuMatch = html.match(/Emulation<\/dt><dd>([^<]+)/);
   if (emuMatch) info.emulation = decodeHtml(emuMatch[1]);
 
-  // Weitere Fehler-Keywords (im gesamten HTML)
+  // Keyword-Scan als Fallback (nur wenn noch nicht via deviceStatus erkannt)
   const htmlUpper = html.toUpperCase();
-  if (htmlUpper.includes('COVER OPEN'))    errors.push('Deckel offen');
-  if (htmlUpper.includes('NO MEDIA'))      errors.push('Kein Band eingelegt');
-  if (htmlUpper.includes('CUTTER JAM'))    errors.push('Schneidwerk blockiert');
-  if (htmlUpper.includes('END OF MEDIA'))  errors.push('Band leer (Ende)');
+  if (!deviceErrors.has('COVER OPEN')   && htmlUpper.includes('COVER OPEN'))   deviceErrors.add('COVER OPEN');
+  if (!deviceErrors.has('NO MEDIA')     && htmlUpper.includes('NO MEDIA'))     deviceErrors.add('NO MEDIA');
+  if (!deviceErrors.has('CUTTER JAM')   && htmlUpper.includes('CUTTER JAM'))   deviceErrors.add('CUTTER JAM');
+  if (!deviceErrors.has('END OF MEDIA') && htmlUpper.includes('END OF MEDIA')) deviceErrors.add('END OF MEDIA');
+
+  // Fehler aus Set in lesbares Array umwandeln
+  const errorLabels = {
+    'COVER OPEN':   'Deckel offen',
+    'NO MEDIA':     'Kein Band eingelegt',
+    'END OF MEDIA': 'Band leer',
+    'CUTTER JAM':   'Schneidwerk blockiert',
+  };
+  for (const [key, label] of Object.entries(errorLabels)) {
+    if (deviceErrors.has(key)) errors.push(label);
+  }
 
   return { errors, warnings, info };
 }
+
+// ── Haupt-Check ───────────────────────────────────────────────────────────────
 
 async function checkPrinter(host, port, timeoutMs = 5000) {
   const reachable = await tcpPing(host, port, timeoutMs);
@@ -122,6 +153,8 @@ async function checkPrinter(host, port, timeoutMs = 5000) {
   }
 }
 
+// ── Warten bis TCP erreichbar ─────────────────────────────────────────────────
+
 async function waitForPrinter(host, port, retryIntervalMs = 30000, timeoutMs = 5000) {
   let attempt = 0;
   while (true) {
@@ -136,4 +169,25 @@ async function waitForPrinter(host, port, retryIntervalMs = 30000, timeoutMs = 5
   }
 }
 
-module.exports = { checkPrinter, waitForPrinter, PrinterStatus };
+// ── Warten bis Drucker bereit (kein Fehler) ───────────────────────────────────
+
+async function waitForPrinterReady(host, port, retryIntervalMs = 30000, timeoutMs = 5000) {
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    const status = await checkPrinter(host, port, timeoutMs);
+
+    if (!status.reachable) {
+      logger.warn(`Drucker ${host}:${port} nicht erreichbar (Versuch ${attempt}) — retry in ${retryIntervalMs / 1000}s`);
+    } else if (status.errors.length > 0) {
+      logger.warn(`Drucker ${host}:${port} nicht bereit: ${status.errors.join(', ')} (Versuch ${attempt}) — retry in ${retryIntervalMs / 1000}s`);
+    } else {
+      if (attempt > 1) logger.info(`✅ Drucker ${host}:${port} wieder bereit (nach ${attempt} Versuchen)`);
+      return status;
+    }
+
+    await new Promise(r => setTimeout(r, retryIntervalMs));
+  }
+}
+
+module.exports = { checkPrinter, waitForPrinter, waitForPrinterReady, PrinterStatus };
