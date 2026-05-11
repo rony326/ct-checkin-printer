@@ -153,9 +153,12 @@ class JobPoller {
     if (prevMode === 'sleeping' && newMode !== 'sleeping') {
       await this.client.ensureLogin();
 
-      // Drucker-Check + Anmeldung (identisch zum Dienststart in index.js)
+      // Drucker-Check + Anmeldung
       logger.info(`🔔 Zeitfenster geöffnet — starte Drucker-Check für "${printerName}"`);
-      if (printerHost) {
+      const checkEnabled = this.config.PRINTER_CHECK_ENABLED !== false;
+      if (!checkEnabled) {
+        logger.info(`⏭️  Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
+      } else if (printerHost) {
         const retryMs      = this.config.PRINTER_CHECK_RETRY_MS || 30000;
         const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS     || 5000;
 
@@ -174,7 +177,7 @@ class JobPoller {
           }
         } else {
           logger.info(`✅ Drucker "${printerName}" bereit`);
-          if (status.raw) logger.debug(`Status Bytes: ${status.raw.hex}`);
+          if (status.raw) logger.debug(`Web-Status: ${JSON.stringify(status.raw)}`);
         }
       }
 

@@ -116,13 +116,14 @@ async function main() {
     const manager = new PrinterManager(p.printerHost, p.printerPort, config);
     const pollerConfig = {
       ...config,
-      HOSTNAME:               p.hostname,
-      PRINTER_NAME:           p.printerName,
-      PRINTER_HOST:           p.printerHost,
-      PRINTER_PORT:           p.printerPort,
-      ACTIVE_TIMES:           p.activeTimes,
-      PRINTER_CHECK_RETRY_MS: p.checkRetryIntervalMs,
-      STATUS_WEBHOOK_ENABLED: p.statusWebhook,
+      HOSTNAME:                p.hostname,
+      PRINTER_NAME:            p.printerName,
+      PRINTER_HOST:            p.printerHost,
+      PRINTER_PORT:            p.printerPort,
+      ACTIVE_TIMES:            p.activeTimes,
+      PRINTER_CHECK_ENABLED:   p.checkEnabled,
+      PRINTER_CHECK_RETRY_MS:  p.checkRetryIntervalMs,
+      STATUS_WEBHOOK_ENABLED:  p.statusWebhook,
     };
     return { def: p, manager, poller: new JobPoller(client, manager, pollerConfig, webhook) };
   });

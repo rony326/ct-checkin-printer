@@ -39,6 +39,7 @@ function loadPrinters(raw, globalActiveTimes, parseSchedule) {
         activeTimes,
         activeTimesRaw:        entry.activeTimes ?? null,
         // Drucker-Check Einstellungen
+        checkEnabled:          entry.checkEnabled !== false,  // Standard: true — false = kein TCP/Web-Check
         checkRetryIntervalMs:  entry.checkRetryIntervalMs ?? 30000,
         statusWebhook:         entry.statusWebhook !== false, // Standard: true
       };
