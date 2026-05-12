@@ -4,7 +4,7 @@ require('dotenv').config();
 const path = require('path');
 const { parseActiveTimes } = require('./schedule');
 
-// ── .env (Secrets + Umgebung) ──────────────────────────────────────────────
+// ── .env (Secrets + Umgebung) ─────────────────────────────────────────────────
 
 function required(key) {
   const val = process.env[key];
@@ -12,7 +12,7 @@ function required(key) {
   return val;
 }
 
-// ── config.js laden ────────────────────────────────────────────────────────
+// ── config.js laden ───────────────────────────────────────────────────────────
 
 const CONFIG_FILE = path.resolve(process.env.CONFIG_FILE || './config.js');
 
@@ -23,7 +23,7 @@ try {
   throw new Error(`config.js konnte nicht geladen werden (${CONFIG_FILE}): ${err.message}`);
 }
 
-// ── Zeitfenster parsen ─────────────────────────────────────────────────────
+// ── Zeitfenster parsen ────────────────────────────────────────────────────────
 
 function parseSchedule(raw) {
   if (!raw || raw.trim() === '') return null;
@@ -34,7 +34,7 @@ function parseSchedule(raw) {
   }
 }
 
-// ── Export ─────────────────────────────────────────────────────────────────
+// ── Export ────────────────────────────────────────────────────────────────────
 
 module.exports = {
   // Secrets aus .env
@@ -70,12 +70,12 @@ module.exports = {
   // Drucker-Liste (aus config.js)
   PRINTERS_RAW: cfg.printers || [],
 
-  // Webhooks (aus config.js)
+  // Check-In Webhooks (aus config.js)
   WEBHOOKS_RAW:        cfg.webhooks            || [],
   WEBHOOK_BLOCK_PRINT: cfg.webhookOptions?.blockPrint ? 'true' : 'false',
 
   // Status-Webhooks (aus config.js)
-  STATUS_WEBHOOKS_RAW:  cfg.statusWebhooks      || [],
+  STATUS_WEBHOOKS_RAW: cfg.statusWebhooks      || [],
 
   // Interne Hilfsfunktion
   _parseSchedule: parseSchedule,

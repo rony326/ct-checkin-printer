@@ -26,7 +26,7 @@ module.exports = {
     // Tagkürzel: Mo Di Mi Do Fr Sa So (auch englisch: Mo Tu We Th Fr Sa Su)
     activeTimes: 'So:09:00-13:00',
 
-    // Anzahl aufeinanderfolgender Fehler bevor eine 60s-Pause eingelegt wird
+    // Anzahl aufeinanderfolgender Fehler bevor der Dienst neu gestartet wird
     maxErrors: 10,
   },
 
@@ -102,10 +102,15 @@ module.exports = {
       // Leer ('') oder Feld weglassen = globales Zeitfenster verwenden.
       // null = immer aktiv (ignoriert auch globales Zeitfenster).
       activeTimes: 'So:09:00-12:00 18:00-20:00',
-      
+
+      // false = kein TCP/Web-Status Check (für nicht unterstützte Drucker)
       checkEnabled: true,
-      checkRetryIntervalMs: 30000,  // wie oft prüfen wenn offline
-      statusWebhook: true,          // Webhook bei Drucker-Fehler feuern
+
+      // Wie oft prüfen wenn Drucker nicht erreichbar oder fehlerhaft (ms)
+      checkRetryIntervalMs: 30000,
+
+      // Status-Webhook bei Drucker-Fehler/Warnung feuern (siehe statusWebhooks[])
+      statusWebhook: true,
     },
     {
       hostname: 'A1',
@@ -113,19 +118,18 @@ module.exports = {
       printerHost: '192.168.1.51',
       printerPort: 9100,
 
-      // Dieser Drucker nutzt das globale Zeitfenster (polling.activeTimes)
-      // activeTimes: '',  // weglassen oder leer lassen
-      // Drucker-Check
+      // Globales Zeitfenster verwenden (polling.activeTimes)
+      // activeTimes: '',
+
       checkEnabled: true,
-      checkRetryIntervalMs: 30000,  // wie oft prüfen wenn offline
-      statusWebhook: true,          // Webhook bei Drucker-Fehler feuern
-      // Drucker-Check vor Anmeldung
+      checkRetryIntervalMs: 30000,
+      statusWebhook: true,
     },
   ],
 
-  // ── Webhooks ───────────────────────────────────────────────────────────────
-  // Ein Eintrag pro Webhook-Ziel.
-  // Alle aktiven Webhooks werden nach jedem Check-In parallel gefeuert.
+  // ── Check-In Webhooks ──────────────────────────────────────────────────────
+  // Werden nach jedem Druckauftrag gefeuert.
+  // Alle aktiven Einträge werden parallel angesprochen.
   webhooks: [
     {
       // Anzeigename im Log
@@ -146,22 +150,16 @@ module.exports = {
       // Wartezeit zwischen Versuchen in ms
       retryMs: 2000,
 
-      // false = dieser Webhook ist deaktiviert ohne ihn zu löschen
+      // false = deaktiviert ohne Eintrag zu löschen
       enabled: true,
     },
     {
       name: 'Dev',
       url: 'https://dev.meinserver.ch/checkin/webhook',
       method: 'POST',
-
-      // Kein Secret für Dev-Umgebung
       secret: null,
-
-      // Nur 1 Versuch im Dev (schnell scheitern)
       retry: 1,
       retryMs: 1000,
-
-      // Deaktiviert — zum Aktivieren auf true setzen
       enabled: false,
     },
   ],
@@ -169,8 +167,28 @@ module.exports = {
   // ── Webhook-Optionen ───────────────────────────────────────────────────────
   webhookOptions: {
     // true = Druck wartet auf erfolgreichen Webhook aller Ziele
-    // false = Webhooks laufen im Hintergrund, Druck wird nicht blockiert (empfohlen)
+    // false = Webhooks laufen im Hintergrund, Druck nicht blockiert (empfohlen)
     blockPrint: false,
   },
+
+  // ── Status-Webhooks ────────────────────────────────────────────────────────
+  // Separater Webhook nur für Drucker-Status-Events.
+  // Unabhängig von den Check-In Webhooks konfigurierbar.
+  //
+  // Events:
+  //   printer.error   — kritischer Fehler (Deckel offen, Band leer etc.)
+  //   printer.warning — Warnung
+  //   printer.ready   — Drucker wieder bereit nach Fehler
+  statusWebhooks: [
+    {
+      name:    'Alert',
+      url:     'https://meinserver.ch/printer/alert',
+      method:  'POST',
+      secret:  null,
+      retry:   3,
+      retryMs: 2000,
+      enabled: false,
+    },
+  ],
 
 };

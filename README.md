@@ -395,11 +395,12 @@ curl -X POST https://meinegemeinde.church.tools/api/login \
 
 ## Getestete Hardware
 
-| Gerät | Status |
-|---|---|
-| Brother QL-720NWB | ✅ |
-| DK-N55224 (54mm, nicht-klebend) | ✅ |
-| Raspberry Pi / Debian | ✅ |
+| Gerät                           | Status |
+| ---------------------------------| --------|
+| Brother QL-720NWB               | ✅      |
+| Brother QL-820NWB               | ✅      |
+| DK-N55224 (54mm, nicht-klebend) | ✅      |
+| Raspberry Pi / Debian           | ✅      |
 
 ---
 
