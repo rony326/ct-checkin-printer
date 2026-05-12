@@ -14,7 +14,15 @@ class PrinterManager {
     this.script       = path.resolve(__dirname, '..', 'print_label.py');
     this.layoutFile   = path.resolve(__dirname, '..', config.LAYOUT_FILE  || 'label-layout.json');
     this.mappingFile  = path.resolve(__dirname, '..', config.MAPPING_FILE || 'field-mapping.json');
-    this.fieldMapping = config.FIELD_MAPPING || null; // aus config.json (überschreibt Datei)
+    this.fieldMapping = config.FIELD_MAPPING || null;
+
+    // Queue-Konfiguration pro Drucker
+    this.queueConfig = config.PRINT_QUEUE || {
+      maxRetries:        5,
+      maxAgeMs:          1800000,
+      retryDelayMs:      30000,
+      retryOnPrintError: true,
+    };
   }
 
   generateQrHash(id, code, timestamp) {
@@ -45,6 +53,10 @@ class PrinterManager {
     });
   }
 
+  /**
+   * Druckt Jobs. Gibt { enriched, failed } zurück.
+   * failed enthält Jobs die fehlgeschlagen sind mit Grund und ob es ein Druckfehler war.
+   */
   async printJob(jobData) {
     const jobs  = Array.isArray(jobData) ? jobData : [jobData];
     const valid = jobs.filter(j => j?.data?.trim());
@@ -56,10 +68,28 @@ class PrinterManager {
     });
 
     logger.info(`Drucke ${enriched.length} Etikett(en) → ${this.host}:${this.port}`);
-    await this._runPython(JSON.stringify(enriched));
-    logger.info(`✅ ${enriched.length} Etikett(en) gedruckt`);
 
-    return enriched;
+    const failed = [];
+
+    try {
+      await this._runPython(JSON.stringify(enriched));
+      logger.info(`✅ ${enriched.length} Etikett(en) gedruckt`);
+    } catch (err) {
+      // Druckfehler — alle Jobs als fehlgeschlagen markieren
+      logger.error(`Druckfehler: ${err.message}`);
+      for (const job of enriched) {
+        failed.push({ job, reason: err.message, printError: true });
+      }
+    }
+
+    return { enriched, failed };
+  }
+
+  /**
+   * Einzelnen Job aus Queue drucken (ein Etikett).
+   */
+  async printSingleJob(job) {
+    await this._runPython(JSON.stringify([job]));
   }
 
   _runPython(jsonInput) {
@@ -72,7 +102,6 @@ class PrinterManager {
         '--layout', this.layoutFile,
       ];
 
-      // Field-Mapping: inline JSON aus config.json hat Vorrang vor Datei
       if (this.fieldMapping) {
         args.push('--mapping-json', JSON.stringify(this.fieldMapping));
       } else {

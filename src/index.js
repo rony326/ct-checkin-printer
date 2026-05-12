@@ -115,6 +115,7 @@ async function main() {
       PRINTER_CHECK_ENABLED:  p.checkEnabled,
       PRINTER_CHECK_RETRY_MS: p.checkRetryIntervalMs,
       STATUS_WEBHOOK_ENABLED: p.statusWebhook,
+      PRINT_QUEUE:            p.printQueue,
     };
     return { def: p, manager, poller: new JobPoller(client, manager, pollerConfig, webhook, statusWebhook) };
   });

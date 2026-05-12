@@ -1,8 +1,9 @@
 'use strict';
 
-const { logger }           = require('./logger');
+const { logger }                     = require('./logger');
 const { isActiveNow, msUntilNextWindow } = require('./schedule');
-const { waitForPrinterReady } = require('./printer-checker');
+const { waitForPrinterReady, checkPrinter } = require('./printer-checker');
+const { PrintQueue }                 = require('./print-queue');
 
 class JobPoller {
   constructor(client, printerManager, config, webhookService = null, statusWebhookService = null) {
@@ -19,7 +20,14 @@ class JobPoller {
     this._startTime         = null;
     this._lastJobAt         = null;
     this._lastMode          = null;
+
+    // Retry-Queue
+    this._queue        = new PrintQueue(config);
+    this._queueTimer   = null;
+    this._printerReady = true; // Annahme: bereit beim Start
   }
+
+  // ── Public ─────────────────────────────────────────────────────────────────
 
   async start() {
     if (this._running) return;
@@ -32,17 +40,15 @@ class JobPoller {
     } else {
       logger.info('Kein Zeitfenster — pollt immer');
     }
-    if (this.webhook?.enabled) {
-      logger.info(`Webhook aktiv | blockierend: ${this.config.WEBHOOK_BLOCK_PRINT}`);
-    }
 
     this._scheduleNext(0);
   }
 
   async stop() {
     this._running = false;
-    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
-    logger.info(`Poller gestoppt. Gedruckt: ${this._totalPrinted}`);
+    if (this._timer)      { clearTimeout(this._timer);      this._timer      = null; }
+    if (this._queueTimer) { clearTimeout(this._queueTimer); this._queueTimer = null; }
+    logger.info(`Poller gestoppt. Gedruckt: ${this._totalPrinted} | Queue: ${this._queue.size}`);
   }
 
   status() {
@@ -51,10 +57,14 @@ class JobPoller {
       mode:              this._currentMode(),
       consecutiveErrors: this._consecutiveErrors,
       totalPrinted:      this._totalPrinted,
+      printerReady:      this._printerReady,
+      queue:             this._queue.status(),
       uptimeSeconds:     this._startTime ? Math.floor((Date.now() - this._startTime) / 1000) : 0,
       lastJobAt:         this._lastJobAt ? new Date(this._lastJobAt).toISOString() : null,
     };
   }
+
+  // ── Polling ────────────────────────────────────────────────────────────────
 
   _currentMode() {
     if (!isActiveNow(this.config.ACTIVE_TIMES)) return 'sleeping';
@@ -109,25 +119,12 @@ class JobPoller {
       }
 
       logger.info('📄 Druckauftrag empfangen');
-      const enrichedJobs = await this.printer.printJob(jobData);
 
-      this._totalPrinted++;
+      // Drucker-Status vor dem Druck prüfen
+      await this._printWithQueueSupport(jobData);
+
       this._consecutiveErrors = 0;
       this._lastJobAt = Date.now();
-
-      if (this.webhook?.enabled && enrichedJobs) {
-        const printerDef = {
-          hostname:    this.config.HOSTNAME,
-          printerName: this.config.PRINTER_NAME || this.config.HOSTNAME,
-          printerHost: this.config.PRINTER_HOST || '',
-        };
-        try {
-          await this.webhook.send(enrichedJobs, printerDef);
-        } catch (err) {
-          logger.error('Webhook fehlgeschlagen:', err.message);
-        }
-      }
-
       this._scheduleNext(200);
 
     } catch (err) {
@@ -150,18 +147,168 @@ class JobPoller {
     }
   }
 
+  // ── Druck mit Queue-Support ────────────────────────────────────────────────
+
+  async _printWithQueueSupport(jobData) {
+    const printerHost = this.config.PRINTER_HOST;
+    const printerPort = this.config.PRINTER_PORT || 9100;
+    const checkEnabled = this.config.PRINTER_CHECK_ENABLED !== false;
+
+    // Drucker-Status vor dem Druck prüfen
+    if (checkEnabled && printerHost) {
+      const status = await checkPrinter(printerHost, printerPort, this.config.PRINTER_TIMEOUT_MS || 5000);
+
+      if (!status.reachable || status.errors.length > 0) {
+        // Drucker nicht bereit — Jobs in Queue
+        const jobs = Array.isArray(jobData) ? jobData : [jobData];
+        const enriched = this.printer.enrichJobs(jobs.filter(j => j?.data?.trim()));
+
+        for (const job of enriched) {
+          const reason = !status.reachable
+            ? 'Drucker nicht erreichbar'
+            : status.errors.join(', ');
+          this._queue.enqueue(job, reason, false);
+        }
+
+        // Status-Webhook feuern
+        if (this.statusWebhook?.enabled) {
+          this.statusWebhook.send('printer.error', {
+            printerName: this.config.PRINTER_NAME,
+            hostname:    this.config.HOSTNAME,
+            printerHost,
+            printerPort,
+          }, status);
+        }
+
+        // Drucker-Status überwachen starten
+        this._printerReady = false;
+        this._startQueueMonitor();
+        return;
+      }
+    }
+
+    // Drucker bereit — drucken
+    const { enriched, failed } = await this.printer.printJob(jobData);
+    this._totalPrinted += (enriched.length - failed.length);
+
+    // Fehlgeschlagene Jobs in Queue
+    for (const { job, reason, printError } of failed) {
+      this._queue.enqueue(job, reason, printError);
+    }
+
+    if (failed.length > 0) {
+      this._printerReady = false;
+      this._startQueueMonitor();
+    }
+
+    // Check-In Webhook
+    if (this.webhook?.enabled && enriched.length > 0) {
+      const printerDef = {
+        hostname:    this.config.HOSTNAME,
+        printerName: this.config.PRINTER_NAME || this.config.HOSTNAME,
+        printerHost: this.config.PRINTER_HOST || '',
+      };
+      this.webhook.send(enriched, printerDef).catch(err =>
+        logger.error('Webhook fehlgeschlagen:', err.message)
+      );
+    }
+  }
+
+  // ── Queue Monitor ──────────────────────────────────────────────────────────
+
+  _startQueueMonitor() {
+    if (this._queueTimer) return; // Läuft bereits
+    if (this._queue.isEmpty) return;
+
+    const retryDelayMs = this.config.PRINT_QUEUE?.retryDelayMs
+      || this.printer.queueConfig?.retryDelayMs
+      || 30000;
+
+    logger.info(`🔁 Queue-Monitor gestartet (prüft alle ${retryDelayMs / 1000}s)`);
+    this._scheduleQueueCheck(retryDelayMs);
+  }
+
+  _scheduleQueueCheck(delayMs) {
+    if (!this._running) return;
+    this._queueTimer = setTimeout(() => this._checkQueueAndFlush(), delayMs);
+  }
+
+  async _checkQueueAndFlush() {
+    this._queueTimer = null;
+    if (!this._running || this._queue.isEmpty) {
+      this._printerReady = true;
+      return;
+    }
+
+    // Abgelaufene Jobs bereinigen
+    this._queue.cleanup();
+    if (this._queue.isEmpty) {
+      logger.info('Queue: leer nach Bereinigung');
+      this._printerReady = true;
+      return;
+    }
+
+    const printerHost  = this.config.PRINTER_HOST;
+    const printerPort  = this.config.PRINTER_PORT || 9100;
+    const retryDelayMs = this.config.PRINT_QUEUE?.retryDelayMs
+      || this.printer.queueConfig?.retryDelayMs
+      || 30000;
+
+    // Drucker-Status prüfen
+    const status = await checkPrinter(printerHost, printerPort, this.config.PRINTER_TIMEOUT_MS || 5000);
+
+    if (!status.reachable || status.errors.length > 0) {
+      logger.debug(`Queue-Monitor: Drucker noch nicht bereit (${status.toString()}) — retry in ${retryDelayMs / 1000}s`);
+      this._scheduleQueueCheck(retryDelayMs);
+      return;
+    }
+
+    // Drucker wieder bereit — Queue leeren
+    logger.info(`✅ Drucker wieder bereit — leere Queue (${this._queue.size} Job(s))`);
+    this._printerReady = true;
+
+    // Status-Webhook "printer.ready"
+    if (this.statusWebhook?.enabled) {
+      this.statusWebhook.send('printer.ready', {
+        printerName: this.config.PRINTER_NAME,
+        hostname:    this.config.HOSTNAME,
+        printerHost,
+        printerPort,
+      }, status);
+    }
+
+    await this._queue.flush(
+      job => this.printer.printSingleJob(job),
+      job => {
+        logger.warn(`Queue: Job ${job.id} verworfen — Status-Webhook`);
+        if (this.statusWebhook?.enabled) {
+          this.statusWebhook.send('printer.job_expired', {
+            printerName: this.config.PRINTER_NAME,
+            hostname:    this.config.HOSTNAME,
+            printerHost,
+            printerPort,
+          }, { reachable: true, ok: true, errors: [], warnings: [], raw: null });
+        }
+      }
+    );
+
+    // Falls nach flush noch Jobs übrig → weiter monitoren
+    if (!this._queue.isEmpty) {
+      this._scheduleQueueCheck(retryDelayMs);
+    }
+  }
+
+  // ── Zeitfenster-Wechsel ────────────────────────────────────────────────────
+
   async _onModeChange(prevMode, newMode) {
     const hostname    = this.config.HOSTNAME;
     const printerName = this.config.PRINTER_NAME || hostname;
     const printerHost = this.config.PRINTER_HOST;
     const printerPort = this.config.PRINTER_PORT || 9100;
 
-    // ── sleeping → aktiv: Drucker-Check + Anmeldung ────────────────────────
     if (prevMode === 'sleeping' && newMode !== 'sleeping') {
       await this.client.ensureLogin();
 
-      // Drucker-Check + Anmeldung
-      logger.info(`🔔 Zeitfenster geöffnet — starte Drucker-Check für "${printerName}"`);
       const checkEnabled = this.config.PRINTER_CHECK_ENABLED !== false;
       if (!checkEnabled) {
         logger.info(`⏭️  Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
@@ -170,8 +317,6 @@ class JobPoller {
         const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS     || 5000;
 
         logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
-
-        // Warten bis erreichbar UND fehlerfrei (kritische Fehler blockieren Anmeldung)
         const status = await waitForPrinterReady(printerHost, printerPort, retryMs, tcpTimeoutMs);
 
         if (status.warnings.length > 0) {
@@ -185,12 +330,12 @@ class JobPoller {
         }
       }
 
+      logger.info(`🔔 Zeitfenster geöffnet — melde Drucker an: "${printerName}"`);
       const r = await this.client.activatePrinter(hostname, printerName);
       if (r.success) logger.info(`✅ Drucker angemeldet: "${printerName}"`);
       else           logger.error(`Drucker-Anmeldung fehlgeschlagen: ${r.message}`);
     }
 
-    // ── aktiv → sleeping: Abmeldung ────────────────────────────────────────
     if (prevMode !== 'sleeping' && prevMode !== null && newMode === 'sleeping') {
       logger.info(`🔕 Zeitfenster geschlossen — melde Drucker ab: "${printerName}"`);
       const r = await this.client.hidePrinter(hostname);
@@ -199,7 +344,6 @@ class JobPoller {
       this.client.onWindowClose();
     }
 
-    // ── Log ────────────────────────────────────────────────────────────────
     if (newMode === 'sleeping') {
       const ms   = msUntilNextWindow(this.config.ACTIVE_TIMES);
       const info = (ms && ms !== Infinity) ? ` — nächstes Fenster in ${Math.round(ms / 60000)}min` : '';
@@ -212,6 +356,8 @@ class JobPoller {
       logger.info(`🕐 Zurück zu Idle-Polling (${this.config.POLL_IDLE_MS}ms)`);
     }
   }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
   _isEmpty(data) {
     if (data === null || data === undefined) return true;

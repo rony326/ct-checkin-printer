@@ -39,9 +39,17 @@ function loadPrinters(raw, globalActiveTimes, parseSchedule) {
         activeTimes,
         activeTimesRaw:        entry.activeTimes ?? null,
         // Drucker-Check Einstellungen
-        checkEnabled:          entry.checkEnabled !== false,  // Standard: true — false = kein TCP/Web-Check
+        checkEnabled:          entry.checkEnabled !== false,
         checkRetryIntervalMs:  entry.checkRetryIntervalMs ?? 30000,
-        statusWebhook:         entry.statusWebhook !== false, // Standard: true
+        statusWebhook:         entry.statusWebhook !== false,
+
+        // Retry-Queue Einstellungen
+        printQueue: {
+          maxRetries:        entry.printQueue?.maxRetries        ?? 5,
+          maxAgeMs:          entry.printQueue?.maxAgeMs          ?? 1800000,
+          retryDelayMs:      entry.printQueue?.retryDelayMs      ?? 30000,
+          retryOnPrintError: entry.printQueue?.retryOnPrintError !== false,
+        },
       };
     });
 }

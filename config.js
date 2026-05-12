@@ -111,6 +111,22 @@ module.exports = {
 
       // Status-Webhook bei Drucker-Fehler/Warnung feuern (siehe statusWebhooks[])
       statusWebhook: true,
+
+      // Retry-Queue für fehlgeschlagene Druckaufträge
+      printQueue: {
+        // Max. Versuche bevor Job verworfen wird
+        maxRetries: 5,
+
+        // Max. Alter eines Jobs in der Queue in ms (Standard: 30min)
+        maxAgeMs: 1800000,
+
+        // Wie oft Drucker-Status prüfen wenn Queue nicht leer (ms)
+        retryDelayMs: 30000,
+
+        // true = auch bei Druckfehler (Band leer während Druck) in Queue
+        // false = nur bei Fehler VOR dem Druck
+        retryOnPrintError: true,
+      },
     },
     {
       hostname: 'A1',
