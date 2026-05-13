@@ -31,10 +31,12 @@
 | ⚡ | **Adaptives Polling** — langsam im Ruhemodus, schnell nach einem Job |
 | 🕐 | **Zeitfenster** — pro Drucker konfigurierbar, An/Abmeldung automatisch |
 | 🔑 | **Session-Management** — Login nur bei aktivem Zeitfenster, automatische Renewal alle 23h |
+| 🔍 | **Drucker-Check** — TCP-Ping + Brother Web-API Status vor Anmeldung (Band leer, Deckel offen etc.) |
+| 🔁 | **Retry-Queue** — fehlgeschlagene Aufträge automatisch nachdrucken wenn Drucker wieder bereit |
 | 🔖 | **Flexibles Layout** — Schriftgrösse, Ausrichtung, Logo, QR-Code via JSON konfigurierbar |
 | 📱 | **QR-Code** — SHA1-Hash aus ID, Code und Timestamp auf dem Etikett |
-| 🔗 | **Webhooks** — POST/PUT an beliebig viele Ziele nach jedem Check-In |
-| 🔄 | **Exponential Backoff** bei API-Fehlern |
+| 🔗 | **Webhooks** — Check-In Webhook + separater Status-Webhook für Drucker-Events |
+| 🔄 | **Exponential Backoff** bei API-Fehlern, automatischer Neustart via systemd |
 | ✅ | **Graceful Shutdown** — Drucker werden in ChurchTools sauber abgemeldet |
 
 ---
@@ -42,7 +44,7 @@
 ## Voraussetzungen
 
 - Raspberry Pi / Debian, Node.js ≥ 18, Python 3
-- Brother QL Labeldrucker im Netzwerk (getestet: QL-720NWB, DK-N55224 / 54mm)
+- Brother QL Labeldrucker im Netzwerk (getestet: QL-720NWB, QL-820NWB)
 - ChurchTools mit Check-In-Modul, Benutzer mit Rechten:
   - Check-in sehen
   - Drucker verwalten
@@ -111,7 +113,7 @@ module.exports = {
     activeMs: 5000,       // Intervall nach erkanntem Job
     activeTtlMs: 300000,  // Aktiv-Modus Dauer nach letztem Job (5min)
     activeTimes: 'So:09:00-13:00',  // Globales Zeitfenster (leer = immer aktiv)
-    maxErrors: 10,
+    maxErrors: 10,        // Fehler bis Dienst sich neu startet
   },
 
   printer: {
@@ -128,7 +130,7 @@ module.exports = {
   },
 
   logging: {
-    dir: './logs',          // Logfile-Verzeichnis
+    dir: './logs',          // Logfile-Verzeichnis (täglich rotiert)
     retentionDays: 14,      // Aufbewahrung in Tagen
   },
 
@@ -139,26 +141,39 @@ module.exports = {
       printerHost: '192.168.1.50',
       printerPort: 9100,
       activeTimes: 'So:09:00-12:00 18:00-20:00',  // drucker-spezifisches Zeitfenster
-    },
-    {
-      hostname: 'A1',
-      printerName: 'Foyer',
-      printerHost: '192.168.1.51',
-      printerPort: 9100,
-      // activeTimes nicht gesetzt → globales Zeitfenster wird verwendet
+
+      // Drucker-Check
+      checkEnabled: true,             // false = Check überspringen
+      checkRetryIntervalMs: 30000,    // Retry-Intervall wenn offline/fehlerhaft
+
+      // Status-Webhook bei Drucker-Fehler/Warnung (siehe statusWebhooks[])
+      statusWebhook: true,
+
+      // Retry-Queue für fehlgeschlagene Druckaufträge
+      printQueue: {
+        maxRetries: 5,              // Max. Versuche bevor Job verworfen
+        maxAgeMs: 1800000,          // Max. Alter in ms (30min)
+        retryDelayMs: 30000,        // Wie oft Drucker-Status prüfen
+        retryOnPrintError: true,    // Auch bei Druckfehler in Queue
+      },
     },
   ],
 
+  // Check-In Webhooks — nach jedem Druckauftrag
   webhooks: [
     { name: 'Prod', url: 'https://meinserver.ch/webhook', method: 'POST',
       secret: 'token', retry: 3, retryMs: 2000, enabled: true },
-    { name: 'Dev',  url: 'https://dev.meinserver.ch/webhook', method: 'POST',
-      enabled: false },
   ],
 
   webhookOptions: {
     blockPrint: false,  // true = Druck wartet auf Webhook
   },
+
+  // Status-Webhooks — für Drucker-Events (Fehler, Warnung, Bereit)
+  statusWebhooks: [
+    { name: 'Alert', url: 'https://meinserver.ch/printer/alert', method: 'POST',
+      secret: null, retry: 3, retryMs: 2000, enabled: false },
+  ],
 };
 ```
 
@@ -170,6 +185,46 @@ In ChurchTools erscheint der Drucker als **`printerName (hostname)`**, z.B. `Min
 |---|---|---|
 | `hostname` | Technischer Bezeichner / Raumnummer — von CT intern verwendet | `B2` |
 | `printerName` | Anzeigename / Raumname | `Minis` |
+
+#### Drucker-Check
+
+Vor jeder Anmeldung wird der Drucker via TCP-Ping und Brother Web-API geprüft:
+
+| Status | Verhalten |
+|---|---|
+| Nicht erreichbar | Warten bis TCP ok, dann anmelden |
+| Band leer / Deckel offen | Warten bis Fehler behoben, dann anmelden |
+| Warnung | Anmelden + Status-Webhook |
+| `checkEnabled: false` | Direkt anmelden ohne Check |
+
+#### Retry-Queue
+
+Fehlgeschlagene Druckaufträge werden pro Etikett in eine Queue aufgenommen:
+
+| Konfiguration | Beschreibung |
+|---|---|
+| `maxRetries` | Max. Versuche bevor Job verworfen wird |
+| `maxAgeMs` | Max. Alter in ms — danach verworfen |
+| `retryDelayMs` | Wie oft Drucker-Status geprüft wird |
+| `retryOnPrintError` | `true` = auch bei Druckfehler in Queue |
+
+#### Status-Webhook Events
+
+| Event | Auslöser |
+|---|---|
+| `printer.error` | Kritischer Fehler (Band leer, Deckel offen etc.) |
+| `printer.warning` | Warnung (nicht kritisch) |
+| `printer.ready` | Drucker wieder bereit nach Fehler |
+| `printer.job_expired` | Job aus Queue verworfen (zu alt / zu viele Versuche) |
+
+```json
+{
+  "event": "printer.error",
+  "timestamp": 1713355078,
+  "printer": { "name": "Minis", "hostname": "B2", "host": "192.168.1.50", "port": 9100 },
+  "status": { "reachable": true, "ok": false, "errors": ["Band leer"], "warnings": [] }
+}
+```
 
 #### Zeitfenster — activeTimes Format
 
@@ -183,7 +238,7 @@ activeTimes: ''                                       // immer aktiv
 // activeTimes: null                                  // immer aktiv (ignoriert globales)
 ```
 
-#### Webhook-Payload
+#### Check-In Webhook-Payload
 
 ```json
 {
@@ -206,7 +261,7 @@ activeTimes: ''                                       // immer aktiv
 
 ### label-layout.json
 
-Definiert Layout und Inhalt für `parent`- und `child`-Etiketten. Bleibt als separate Datei — wird häufiger angepasst als die restliche Konfiguration.
+Definiert Layout und Inhalt für `parent`- und `child`-Etiketten.
 
 **Block-Typen:**
 
@@ -298,14 +353,14 @@ Meldet den Drucker an, wartet auf einen Check-In und speichert den rohen Job-Pay
 | Zustand | Verhalten |
 |---|---|
 | 💤 Ausserhalb Zeitfenster | Schläft, `hidePrinter` aufgerufen. Prüft sekunden-genau wann nächstes Fenster öffnet. |
-| 🔔 Fenster öffnet | Session sicherstellen → `activatePrinter` → Polling startet |
+| 🔔 Fenster öffnet | Drucker-Check → Session sicherstellen → `activatePrinter` → Polling startet |
 | 🕐 Innerhalb, kein Job | Polling alle `idleMs` (Standard: 15s) |
 | ⚡ Job empfangen | Polling alle `activeMs` (Standard: 5s) für `activeTtlMs` (Standard: 5min) |
 | 🕐 5min ohne Job | Zurück zu `idleMs` |
 | 🔕 Fenster schliesst | `hidePrinter` → Polling pausiert → Session-Renewal pausiert |
-| 🔴 10× Fehler | 60s Pause, dann Neustart |
+| 🔴 MAX_ERRORS Fehler | Drucker abmelden → `process.exit(1)` → systemd startet neu |
 
-Jeder Drucker hat seinen eigenen unabhängigen Modus. Session-Renewal läuft alle 23h solange mindestens ein Drucker aktiv ist.
+Jeder Drucker hat seinen eigenen unabhängigen Modus.
 
 ---
 
@@ -321,6 +376,11 @@ LOG_LEVEL=debug npm start
 **TCP-Verbindung testen**
 ```bash
 nc -zv 192.168.1.50 9100
+```
+
+**Brother Web-Status manuell prüfen**
+```bash
+curl http://192.168.1.50/general/status.html | grep -E "moni|Media|Emulation"
 ```
 
 **Etikett-Vorschau ohne Drucker**
@@ -339,6 +399,12 @@ python3 -c "from brother_ql.labels import ALL_LABELS; [print(l.identifier, l.nam
 curl -X POST https://meinegemeinde.church.tools/api/login \
   -H "Content-Type: application/json" \
   -d '{"username":"user@mail.ch","password":"passwort"}'
+```
+
+**Queue-Status prüfen**
+```bash
+LOG_LEVEL=debug npm start
+# Queue-Monitor und flush werden im Debug-Log sichtbar
 ```
 
 ---
@@ -361,6 +427,8 @@ curl -X POST https://meinegemeinde.church.tools/api/login \
           │         │                (getNextPrinterJob)
           │         └── Session-Renewal alle 23h
           │
+          ├──→ PrinterChecker ──→ TCP-Ping + Brother Web-API
+          │
           ├──→ PrinterManager
           │         │  enrichJobs() → QR-Hash, Timestamp
           │         └──→ print_label.py
@@ -369,7 +437,11 @@ curl -X POST https://meinegemeinde.church.tools/api/login \
           │                   │  brother_ql → Raster
           │                   └──→ TCP 9100 → Labeldrucker
           │
-          └──→ WebhookService ──→ HTTP POST/PUT (parallel)
+          ├──→ PrintQueue ──→ Retry bei Druckfehler
+          │
+          ├──→ WebhookService ──→ HTTP POST/PUT (Check-In Events)
+          │
+          └──→ StatusWebhookService ──→ HTTP POST/PUT (Drucker-Events)
 ```
 
 ### Dateien
@@ -383,9 +455,12 @@ curl -X POST https://meinegemeinde.church.tools/api/login \
 | `src/config.js` | Lädt und validiert `.env` + `config.js` |
 | `src/churchtools-client.js` | Login, Session-Management, oldApi |
 | `src/printer-manager.js` | Jobs anreichern, Python aufrufen |
-| `src/job-poller.js` | Polling-Loop, Zeitfenster, Webhook auslösen |
+| `src/printer-checker.js` | TCP-Ping + Brother Web-API Status |
+| `src/print-queue.js` | Retry-Queue für fehlgeschlagene Jobs |
+| `src/job-poller.js` | Polling-Loop, Zeitfenster, Queue, Webhooks |
 | `src/schedule.js` | Zeitfenster parsen und auswerten |
-| `src/webhook-service.js` | Webhooks senden mit Retry |
+| `src/webhook-service.js` | Check-In Webhooks mit Retry |
+| `src/status-webhook-service.js` | Status-Webhooks für Drucker-Events |
 | `src/printers-config.js` | Drucker-Liste aus config.js laden |
 | `src/logger.js` | Logging mit Timestamps und Datei-Rotation |
 | `print_label.py` | Text → PNG → Brother Raster → TCP |
@@ -395,12 +470,12 @@ curl -X POST https://meinegemeinde.church.tools/api/login \
 
 ## Getestete Hardware
 
-| Gerät                           | Status |
-| ---------------------------------| --------|
-| Brother QL-720NWB               | ✅      |
-| Brother QL-820NWB               | ✅      |
-| DK-N55224 (54mm, nicht-klebend) | ✅      |
-| Raspberry Pi / Debian           | ✅      |
+| Gerät | Status |
+|---|---|
+| Brother QL-720NWB | ✅ |
+| Brother QL-820NWB | ✅ |
+| DK-N55224 (54mm, nicht-klebend) | ✅ |
+| Raspberry Pi / Debian | ✅ |
 
 ---
 

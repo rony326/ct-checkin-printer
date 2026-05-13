@@ -1,5 +1,99 @@
 # Changelog
 
+## v1.2.0 — 2026-05-13
+
+### 🚀 Highlights
+- Vollständiges Drucker-Status-Monitoring mit Brother Web-API
+- Retry-Queue für fehlgeschlagene Druckaufträge
+- Separater Status-Webhook für Drucker-Events
+- Verbessertes Session-Management
+
+### ✨ Neu
+
+#### Drucker-Check (#6)
+- TCP-Ping + Brother Web-API Status-Check vor jeder Drucker-Anmeldung
+- Erkennt: Band leer, Deckel offen, Schneidwerk blockiert, kein Band
+- Wartet automatisch bis Drucker erreichbar und fehlerfrei
+- Pro Drucker deaktivierbar: `checkEnabled: false`
+- Konfigurierbares Retry-Intervall: `checkRetryIntervalMs`
+
+#### Retry-Queue (#11)
+- Fehlgeschlagene Druckaufträge werden pro Etikett in Queue aufgenommen
+- Queue-Monitor prüft regelmässig ob Drucker wieder bereit
+- Automatisches Nachdrucken sobald Drucker bereit
+- Konfigurierbar: `maxRetries`, `maxAgeMs`, `retryDelayMs`, `retryOnPrintError`
+- Abgelaufene/erschöpfte Jobs werden verworfen mit Log + Webhook
+
+#### Status-Webhook
+- Separater Webhook für Drucker-Status-Events (unabhängig von Check-In Webhook)
+- Events: `printer.error`, `printer.warning`, `printer.ready`, `printer.job_expired`
+- Pro Drucker konfigurierbar: `statusWebhook: true/false`
+- Eigene Ziele in `statusWebhooks[]` in `config.js`
+- Feuert auch im Dry-Run Modus
+
+#### Session-Management (#1)
+- Test-Login beim Dienststart zur Credential-Prüfung
+- Session wird nur aufgebaut wenn Zeitfenster aktiv
+- Automatische Session-Renewal alle 23h
+- Automatischer Re-Login bei 401 Unauthorized
+- Session-Renewal pausiert wenn alle Zeitfenster geschlossen
+
+#### Zeitfenster je Drucker (#3)
+- `activeTimes` pro Drucker in `config.js` konfigurierbar
+- Überschreibt globales `polling.activeTimes`
+- `null` = immer aktiv (ignoriert globales Zeitfenster)
+
+### 🐛 Fixes
+- Debug-Logs beim Dienststart (#5) — dotenv wird als erstes geladen
+- Doppelte Fehlermeldungen beim Drucker-Status-Check behoben
+- `Not Empty` wurde fälschlicherweise als `Empty` erkannt (Substring-Bug)
+- `undefined` Fehlermeldungen in `callOldApi` behoben
+- Drucker wird bei `MAX_ERRORS` sauber abgemeldet vor `process.exit(1)`
+- `checkEnabled: false` wurde beim Dienststart ignoriert
+
+### 🔄 Geändert
+- Drucker-Abmeldung bei Zeitfenster-Wechsel (An/Abmelden automatisch)
+- Präzises Zeitfenster-Scheduling (sekunden-genau statt 30s Intervall)
+- `process.exit(1)` nach `MAX_ERRORS` statt 60s Pause → systemd Neustart
+- Logfiles mit täglicher Rotation und konfigurierbarer Retention (#2)
+
+### ⚠️ Breaking Changes
+- `printers.json`, `webhooks.json`, `field-mapping.json` → in `config.js` integriert
+- `.env` enthält nur noch Secrets und Umgebungsvariablen
+- `src/config.js` liest aus `config.js` (JS-Modul) statt `.env`
+
+### 📦 Migration von v1.2.0-beta.2
+1. `config.js` aus diesem Release als Vorlage nehmen
+2. Drucker-Einstellungen aus `printers.json` übertragen
+3. Webhooks aus `webhooks.json` übertragen
+4. Field-Mapping aus `field-mapping.json` übertragen
+5. Alte Dateien löschen: `printers.json`, `webhooks.json`, `field-mapping.json`
+6. `.env` auf Secrets reduzieren
+7. Python: `pip3 install qrcode --break-system-packages`
+8. Neue `src/`-Dateien deployen
+
+### 🐍 Python-Abhängigkeiten
+```bash
+pip3 install brother_ql qrcode pillow --break-system-packages
+```
+
+### 🔧 Neue Config-Felder
+```javascript
+// Pro Drucker
+checkEnabled: true
+checkRetryIntervalMs: 30000
+statusWebhook: true
+printQueue: {
+  maxRetries: 5,
+  maxAgeMs: 1800000,
+  retryDelayMs: 30000,
+  retryOnPrintError: true,
+}
+
+// Neu in config.js
+statusWebhooks: [{ name, url, method, secret, retry, retryMs, enabled }]
+```
+
 ## [1.2.0-beta.2] — 2026-05-10
 
 ### ✨ Neu
