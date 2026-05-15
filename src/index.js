@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const { ChurchToolsClient }    = require('./churchtools-client');
 const { PrinterManager }       = require('./printer-manager');
+const { LabelRouter }          = require('./label-router');
 const { JobPoller }            = require('./job-poller');
 const { WebhookService }       = require('./webhook-service');
 const { StatusWebhookService } = require('./status-webhook-service');
@@ -16,38 +17,65 @@ const config                   = require('./config');
 
 /**
  * Drucker-Check + Anmeldung bei CT.
- * - Kritische Fehler (Band leer, Deckel offen) → warten bis behoben + Webhook
- * - Warnungen → anmelden + Webhook
- * - Check deaktiviert → direkt anmelden
+ * Einzel-Modus: wartet bis der eine Drucker bereit ist.
+ * Routing-Modus: wartet bis ALLE physischen Drucker bereit sind.
  */
 async function checkAndActivatePrinter(client, statusWebhook, def, pollerConfig) {
-  const { printerHost, printerPort, printerName, hostname,
-          checkEnabled, checkRetryIntervalMs } = def;
+  const { printerName, hostname, checkEnabled, checkRetryIntervalMs,
+          isRoutingMode } = def;
   const tcpTimeoutMs = pollerConfig.PRINTER_TIMEOUT_MS || 5000;
 
   if (!checkEnabled) {
     logger.info(`⏭️  Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
-  } else {
-    logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
+  } else if (isRoutingMode) {
+    // Routing-Modus: alle physischen Drucker prüfen
+    const router = new LabelRouter(pollerConfig);
+    const hosts  = router.getUniqueHosts();
+    logger.info(`🔍 Routing-Modus: prüfe ${hosts.length} Drucker für "${printerName}"...`);
 
-    // Warten bis Drucker erreichbar UND fehlerfrei
+    // Alle parallel prüfen und warten
+    await Promise.all(hosts.map(async ({ host, port }) => {
+      let attempt = 0;
+      while (true) {
+        attempt++;
+        const { waitForPrinterReady: wfr } = require('./printer-checker');
+        const status = await wfr(host, port, checkRetryIntervalMs, tcpTimeoutMs);
+
+        if (status.ok) {
+          if (attempt > 1) logger.info(`✅ Drucker ${host}:${port} bereit`);
+          if (status.warnings.length > 0) {
+            logger.warn(`⚠️  ${host}:${port} Warnung: ${status.warnings.join(', ')}`);
+            if (statusWebhook?.enabled) {
+              statusWebhook.send('printer.warning', { printerName, hostname, printerHost: host, printerPort: port }, status);
+            }
+          } else {
+            logger.info(`✅ ${host}:${port} bereit`);
+          }
+          break;
+        }
+      }
+    }));
+
+  } else {
+    // Einzel-Modus: einen Drucker prüfen
+    const { printerHost, printerPort } = def;
+    logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
     const status = await waitForPrinterReady(printerHost, printerPort, checkRetryIntervalMs, tcpTimeoutMs);
 
     if (status.warnings.length > 0) {
       logger.warn(`⚠️  Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
       if (statusWebhook?.enabled) {
-        statusWebhook.send('printer.warning', def, status);
+        statusWebhook.send('printer.warning', { printerName, hostname, printerHost: def.printerHost, printerPort: def.printerPort }, status);
       }
     } else {
       logger.info(`✅ Drucker "${printerName}" bereit`);
-      if (status.raw) logger.debug(`Web-Status: ${JSON.stringify(status.raw)}`);
     }
   }
 
   // Drucker anmelden
   const r = await client.activatePrinter(hostname, printerName);
   if (r.success) {
-    logger.info(`✅ "${printerName} (${hostname})" → ${printerHost}:${printerPort}`);
+    logger.info(`✅ "${printerName} (${hostname})" angemeldet`);
   } else {
     logger.error(`activatePrinter "${hostname}": ${r.message}`);
   }
@@ -73,8 +101,11 @@ async function main() {
     const schedule = p.activeTimesRaw !== null && p.activeTimesRaw !== undefined
       ? `Zeitfenster: ${p.activeTimesRaw || 'immer aktiv (drucker-spezifisch)'}`
       : config.ACTIVE_TIMES ? 'Zeitfenster: global' : 'Zeitfenster: immer aktiv';
+    const modus = p.isRoutingMode
+      ? `Routing (${Object.keys(p.labelRoutes).join(', ')})`
+      : `Einzel (${p.printerHost}:${p.printerPort})`;
     const check = p.checkEnabled ? 'Check: aktiv' : 'Check: deaktiviert';
-    logger.info(`  • ${p.printerName} (${p.hostname}) → ${p.printerHost}:${p.printerPort} | ${schedule} | ${check}`);
+    logger.info(`  • ${p.printerName} (${p.hostname}) | ${modus} | ${schedule} | ${check}`);
   });
 
   // Login
@@ -86,25 +117,17 @@ async function main() {
     process.exit(1);
   }
 
-  // Check-In Webhook (für Druckaufträge)
-  const webhook = new WebhookService(config);
-  if (webhook.enabled) {
-    logger.info(`Webhook: ${webhook.targets.length} Ziel(e) aktiv`);
-  } else {
-    logger.info('Webhook: deaktiviert');
-  }
-
-  // Status-Webhook (für Drucker-Fehler/Warnungen)
+  // Webhooks
+  const webhook       = new WebhookService(config);
   const statusWebhook = new StatusWebhookService(config);
-  if (statusWebhook.enabled) {
-    logger.info(`Status-Webhook: ${statusWebhook.targets.length} Ziel(e) aktiv`);
-  } else {
-    logger.info('Status-Webhook: deaktiviert');
-  }
+
+  if (webhook.enabled)       logger.info(`Webhook: ${webhook.targets.length} Ziel(e) aktiv`);
+  else                       logger.info('Webhook: deaktiviert');
+  if (statusWebhook.enabled) logger.info(`Status-Webhook: ${statusWebhook.targets.length} Ziel(e) aktiv`);
+  else                       logger.info('Status-Webhook: deaktiviert');
 
   // Poller pro Drucker
   const pollers = printers.map(p => {
-    const manager = new PrinterManager(p.printerHost, p.printerPort, config);
     const pollerConfig = {
       ...config,
       HOSTNAME:               p.hostname,
@@ -116,8 +139,16 @@ async function main() {
       PRINTER_CHECK_RETRY_MS: p.checkRetryIntervalMs,
       STATUS_WEBHOOK_ENABLED: p.statusWebhook,
       PRINT_QUEUE:            p.printQueue,
+      IS_ROUTING_MODE:        p.isRoutingMode,
+      LABEL_ROUTES:           p.labelRoutes,
     };
-    return { def: p, manager, poller: new JobPoller(client, manager, pollerConfig, webhook, statusWebhook) };
+
+    // Einzel-Modus: PrinterManager | Routing-Modus: LabelRouter
+    const printer = p.isRoutingMode
+      ? new LabelRouter(pollerConfig)
+      : new PrinterManager(p.printerHost, p.printerPort, pollerConfig);
+
+    return { def: p, printer, poller: new JobPoller(client, printer, pollerConfig, webhook, statusWebhook) };
   });
 
   // Graceful Shutdown
@@ -138,7 +169,7 @@ async function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
   // Drucker-Check + Anmeldung + Polling starten
-  await Promise.all(pollers.map(async ({ def, poller }) => {
+  await Promise.all(pollers.map(async ({ def, printer, poller }) => {
     if (isActiveNow(def.activeTimes)) {
       await client.ensureLogin();
       await checkAndActivatePrinter(client, statusWebhook, def, poller.config);

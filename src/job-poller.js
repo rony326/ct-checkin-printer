@@ -150,12 +150,14 @@ class JobPoller {
   // ── Druck mit Queue-Support ────────────────────────────────────────────────
 
   async _printWithQueueSupport(jobData) {
-    const printerHost = this.config.PRINTER_HOST;
-    const printerPort = this.config.PRINTER_PORT || 9100;
+    const printerHost  = this.config.PRINTER_HOST;
+    const printerPort  = this.config.PRINTER_PORT || 9100;
     const checkEnabled = this.config.PRINTER_CHECK_ENABLED !== false;
+    const isRouting    = this.config.IS_ROUTING_MODE || false;
 
-    // Drucker-Status vor dem Druck prüfen
-    if (checkEnabled && printerHost) {
+    // Drucker-Status vor dem Druck prüfen (nur Einzel-Modus)
+    // Routing-Modus: Checks laufen beim Start und Zeitfenster-Wechsel
+    if (checkEnabled && !isRouting && printerHost) {
       const status = await checkPrinter(printerHost, printerPort, this.config.PRINTER_TIMEOUT_MS || 5000);
 
       if (!status.reachable || status.errors.length > 0) {
@@ -170,7 +172,6 @@ class JobPoller {
           this._queue.enqueue(job, reason, false);
         }
 
-        // Status-Webhook feuern
         if (this.statusWebhook?.enabled) {
           this.statusWebhook.send('printer.error', {
             printerName: this.config.PRINTER_NAME,
@@ -180,15 +181,16 @@ class JobPoller {
           }, status);
         }
 
-        // Drucker-Status überwachen starten
         this._printerReady = false;
         this._startQueueMonitor();
         return;
       }
     }
 
-    // Drucker bereit — drucken
-    const { enriched, failed } = await this.printer.printJob(jobData);
+    // Drucker bereit — drucken (Einzel oder Routing)
+    const { enriched, failed } = await this.printer.printJobs
+      ? await this.printer.printJobs(jobData)    // LabelRouter
+      : await this.printer.printJob(jobData);     // PrinterManager
     this._totalPrinted += (enriched.length - failed.length);
 
     // Fehlgeschlagene Jobs in Queue

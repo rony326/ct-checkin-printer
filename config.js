@@ -32,11 +32,13 @@ module.exports = {
 
   // ── Drucker & Layout ───────────────────────────────────────────────────────
   printer: {
-    // brother_ql Label-Identifier
-    // Alle Typen anzeigen: python3 -c "from brother_ql.labels import ALL_LABELS; [print(l.identifier, l.name) for l in ALL_LABELS]"
+    // brother_ql Label-Identifier (nur für Einzel-Modus relevant)
+    // Alle Typen: python3 -c "from brother_ql.labels import ALL_LABELS; [print(l.identifier, l.name) for l in ALL_LABELS]"
     labelType: '54',
 
     // Pfad zur Layout-Konfiguration (Blöcke, Schriftgrössen, Logo, QR-Code)
+    // Gilt für Einzel- und Routing-Modus. Im Routing-Modus wird der
+    // Etikettentyp (parent/child/leader) als Key in dieser Datei verwendet.
     layoutFile: './label-layout.json',
 
     // TCP-Verbindungs-Timeout zum Drucker in ms
@@ -50,12 +52,9 @@ module.exports = {
   //   id={PersonID}
   //   code={Abholcode}
   //   group={Gruppenname}
-  //   type=parent   (oder child)
+  //   type=parent   (oder child, leader etc.)
   fieldMapping: {
-    // Trennzeichen zwischen Key und Value im CT-Etikettentext
     separator: '=',
-
-    // Mapping: CT-Key (links vom Trennzeichen) → interner Feldname
     fields: {
       name:  'name',
       id:    'id',
@@ -64,12 +63,8 @@ module.exports = {
       type:  'type',
       extra: 'extra',
     },
-
-    // Wert des 'type'-Feldes für Eltern-Etiketten
     parentValue: 'parent',
-
-    // Wert des 'type'-Feldes für Kinder-Etiketten
-    childValue: 'child',
+    childValue:  'child',
   },
 
   // ── Logging ────────────────────────────────────────────────────────────────
@@ -82,64 +77,96 @@ module.exports = {
   },
 
   // ── Drucker-Liste ──────────────────────────────────────────────────────────
-  // Ein Eintrag pro Labeldrucker. hostname und printerName erscheinen in
-  // ChurchTools zusammen als 'Minis (B2)' — printerName (hostname).
+  // Zwei Modi:
+  //   Einzel-Modus:   printerHost direkt — alle Etiketten auf einen Drucker
+  //   Routing-Modus:  labels{} — jeder Etikettentyp auf eigenen Drucker/Layout
   printers: [
-    {
-      // Technischer Bezeichner / Raumnummer — wird von CT intern verwendet
-      hostname: 'B2',
 
-      // Anzeigename / Raumname — erscheint in CT als 'Minis (B2)'
+    // ── Beispiel 1: Einzel-Modus ───────────────────────────────────────────
+    // Alle Etiketten gehen auf denselben Drucker mit demselben Layout.
+    {
+      // Technischer Bezeichner / Raumnummer — von CT intern verwendet
+      // Erscheint in CT als "Minis (B2)"
+      hostname: 'B2',
       printerName: 'Minis',
 
-      // IP-Adresse des Labeldruckers im Netzwerk
+      // Physischer Drucker
       printerHost: '192.168.1.50',
-
-      // TCP-Port des Druckers (Standard: 9100)
       printerPort: 9100,
 
-      // Zeitfenster nur für diesen Drucker — überschreibt polling.activeTimes.
-      // Leer ('') oder Feld weglassen = globales Zeitfenster verwenden.
-      // null = immer aktiv (ignoriert auch globales Zeitfenster).
+      // Zeitfenster nur für diesen Drucker (überschreibt polling.activeTimes)
+      // Leer = globales Zeitfenster | null = immer aktiv
       activeTimes: 'So:09:00-12:00 18:00-20:00',
 
-      // false = kein TCP/Web-Status Check (für nicht unterstützte Drucker)
-      checkEnabled: true,
-
-      // Wie oft prüfen wenn Drucker nicht erreichbar oder fehlerhaft (ms)
-      checkRetryIntervalMs: 30000,
-
-      // Status-Webhook bei Drucker-Fehler/Warnung feuern (siehe statusWebhooks[])
-      statusWebhook: true,
+      // Drucker-Check vor Anmeldung
+      checkEnabled:         true,    // false = Check überspringen
+      checkRetryIntervalMs: 30000,   // Retry wenn offline/fehlerhaft (ms)
+      statusWebhook:        true,    // Webhook bei Drucker-Fehler/Warnung
 
       // Retry-Queue für fehlgeschlagene Druckaufträge
       printQueue: {
-        // Max. Versuche bevor Job verworfen wird
-        maxRetries: 5,
-
-        // Max. Alter eines Jobs in der Queue in ms (Standard: 30min)
-        maxAgeMs: 1800000,
-
-        // Wie oft Drucker-Status prüfen wenn Queue nicht leer (ms)
-        retryDelayMs: 30000,
-
-        // true = auch bei Druckfehler (Band leer während Druck) in Queue
-        // false = nur bei Fehler VOR dem Druck
-        retryOnPrintError: true,
+        maxRetries:        5,        // Max. Versuche bevor Job verworfen
+        maxAgeMs:          1800000,  // Max. Alter in ms (30min)
+        retryDelayMs:      30000,    // Wie oft Status prüfen (ms)
+        retryOnPrintError: true,     // Auch bei Druckfehler in Queue
       },
     },
+
+    // ── Beispiel 2: Routing-Modus ──────────────────────────────────────────
+    // Verschiedene Etiketten auf verschiedene Drucker routen.
+    // labels{} aktiviert den Routing-Modus — printerHost wird nicht benötigt.
+    //
+    // Beim Start werden ALLE physischen Drucker dieses Standorts geprüft.
+    // Gleichzeitiger Druck: verschiedene Drucker parallel, gleicher Drucker sequenziell.
     {
-      hostname: 'A1',
+      hostname:    'A1',
       printerName: 'Foyer',
-      printerHost: '192.168.1.51',
-      printerPort: 9100,
+      activeTimes: 'So:09:00-13:00',
 
-      // Globales Zeitfenster verwenden (polling.activeTimes)
-      // activeTimes: '',
-
-      checkEnabled: true,
+      checkEnabled:         true,
       checkRetryIntervalMs: 30000,
-      statusWebhook: true,
+      statusWebhook:        true,
+      printQueue: {
+        maxRetries:        5,
+        maxAgeMs:          1800000,
+        retryDelayMs:      30000,
+        retryOnPrintError: true,
+      },
+
+      // Routing: Key = type=-Feld im CT-Etikettentemplate
+      labels: {
+
+        // Layout kommt aus label-layout.json — Key = type-Name (parent/leader/child)
+        // Eltern-Etikett → Drucker A (54mm nicht-klebend)
+        parent: {
+          printerHost: '192.168.1.51',
+          printerPort: 9100,
+          labelType:   '54',             // 54mm Endlosband
+          rotate:      '0',              // '0' | '90' | '180' | '270'
+          enabled:     true,             // false = Etikett deaktivieren
+          copies:      1,                // Anzahl Kopien
+        },
+
+        // Leiter-Etikett → gleicher Drucker wie parent (sequenziell)
+        leader: {
+          printerHost: '192.168.1.51',   // gleiche IP wie parent → sequenziell
+          printerPort: 9100,
+          labelType:   '54',
+          rotate:      '0',
+          enabled:     true,
+          copies:      1,
+        },
+
+        // Kinder-Etikett → Drucker B (60x86mm selbstklebend, parallel zu A)
+        child: {
+          printerHost: '192.168.1.52',
+          printerPort: 9100,
+          labelType:   '60x86',          // DK-11234
+          rotate:      '0',
+          enabled:     true,
+          copies:      1,
+        },
+      },
     },
   ],
 
@@ -148,33 +175,20 @@ module.exports = {
   // Alle aktiven Einträge werden parallel angesprochen.
   webhooks: [
     {
-      // Anzeigename im Log
-      name: 'Prod',
-
-      // Ziel-URL des Webhooks
-      url: 'https://meinserver.ch/checkin/webhook',
-
-      // HTTP-Methode: POST oder PUT
-      method: 'POST',
-
-      // Bearer-Token für Authorization-Header. null = kein Auth-Header
-      secret: 'meinProdToken',
-
-      // Anzahl Versuche bei Fehler
-      retry: 3,
-
-      // Wartezeit zwischen Versuchen in ms
+      name:    'Prod',
+      url:     'https://meinserver.ch/checkin/webhook',
+      method:  'POST',
+      secret:  'meinProdToken',
+      retry:   3,
       retryMs: 2000,
-
-      // false = deaktiviert ohne Eintrag zu löschen
       enabled: true,
     },
     {
-      name: 'Dev',
-      url: 'https://dev.meinserver.ch/checkin/webhook',
-      method: 'POST',
-      secret: null,
-      retry: 1,
+      name:    'Dev',
+      url:     'https://dev.meinserver.ch/checkin/webhook',
+      method:  'POST',
+      secret:  null,
+      retry:   1,
       retryMs: 1000,
       enabled: false,
     },
@@ -189,12 +203,12 @@ module.exports = {
 
   // ── Status-Webhooks ────────────────────────────────────────────────────────
   // Separater Webhook nur für Drucker-Status-Events.
-  // Unabhängig von den Check-In Webhooks konfigurierbar.
   //
   // Events:
   //   printer.error   — kritischer Fehler (Deckel offen, Band leer etc.)
   //   printer.warning — Warnung
   //   printer.ready   — Drucker wieder bereit nach Fehler
+  //   printer.job_expired — Job aus Queue verworfen
   statusWebhooks: [
     {
       name:    'Alert',

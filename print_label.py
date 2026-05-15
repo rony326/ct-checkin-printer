@@ -34,7 +34,8 @@ parser.add_argument('--label',   default='54')
 parser.add_argument('--layout',  default='label-layout.json')
 parser.add_argument('--mapping',      default='field-mapping.json')
 parser.add_argument('--mapping-json', default=None, help='Field-Mapping als JSON-String (überschreibt --mapping)')
-parser.add_argument('--dry-run', action='store_true')
+parser.add_argument('--rotate',   default='0',  help='Rotation: 0, 90, 180, 270')
+parser.add_argument('--dry-run',  action='store_true')
 args = parser.parse_args()
 
 # ── Config laden ──────────────────────────────────────────────────────────────
@@ -305,7 +306,7 @@ def render_label(parsed, layout_def, print_width, qr_hash=None):
 def print_images(images, host, port, label_type):
     qlr = BrotherQLRaster('QL-720NW')
     qlr.exception_on_warning = False
-    convert(qlr=qlr, images=images, label=label_type, rotate='0',
+    convert(qlr=qlr, images=images, label=label_type, rotate=args.rotate,
             threshold=70.0, dither=False, compress=False,
             red=False, dpi_600=False, hq=True, cut=True)
     backend = BrotherQLBackendNetwork('tcp://{}:{}'.format(host, port))
