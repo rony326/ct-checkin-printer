@@ -1,0 +1,12 @@
+# Python-Abhängigkeiten für print_label.py
+#
+# Installation:
+#   pip3 install -r requirements.txt --break-system-packages
+#
+# WICHTIG: brother_ql-inventree statt original brother_ql verwenden!
+# Grund: bessere Unterstützung für QL-820NWB und DK-11234 (60x86mm)
+# Repo: https://github.com/matmair/brother_ql-inventree
+
+brother_ql-inventree
+Pillow
+qrcode

@@ -33,7 +33,8 @@
 | 🔑 | **Session-Management** — Login nur bei aktivem Zeitfenster, automatische Renewal alle 23h |
 | 🔍 | **Drucker-Check** — TCP-Ping + Brother Web-API Status vor Anmeldung (Band leer, Deckel offen etc.) |
 | 🔁 | **Retry-Queue** — fehlgeschlagene Aufträge automatisch nachdrucken wenn Drucker wieder bereit |
-| 🔖 | **Flexibles Layout** — Schriftgrösse, Ausrichtung, Logo, QR-Code via JSON konfigurierbar |
+| 🔀 | **Label-Routing** — verschiedene Etiketten auf verschiedene Drucker mit eigenem Layout |
+| 🔖 | **Flexibles Layout** — Schriftgrösse, Ausrichtung, Logo, QR-Code, Freitext via JSON |
 | 📱 | **QR-Code** — SHA1-Hash aus ID, Code und Timestamp auf dem Etikett |
 | 🔗 | **Webhooks** — Check-In Webhook + separater Status-Webhook für Drucker-Events |
 | 🔄 | **Exponential Backoff** bei API-Fehlern, automatischer Neustart via systemd |
@@ -63,7 +64,7 @@ npm install
 
 # 3. Python-Abhängigkeiten
 apt-get install -y python3-pip python3-pil fonts-dejavu
-pip3 install brother_ql qrcode pillow --break-system-packages
+pip3 install -r requirements.txt --break-system-packages
 
 # 4. Konfiguration
 cp .env.example .env
@@ -71,13 +72,15 @@ nano .env        # CT_BASE_URL, CT_USERNAME, CT_PASSWORD eintragen
 nano config.js   # Drucker, Zeitfenster, Webhooks konfigurieren
 ```
 
+> **Hinweis:** Wir verwenden `brother_ql-inventree` statt dem originalen `brother_ql` für bessere QL-820NWB Unterstützung und natives `60x86` (DK-11234) Label.
+
 ---
 
 ## Konfiguration
 
 ### .env
 
-Enthält ausschliesslich Secrets und Umgebungsvariablen — **nie in Git einchecken**.
+Enthält ausschliesslich Secrets und Umgebungsvariablen.
 
 ```ini
 # ChurchTools Zugangsdaten
@@ -105,6 +108,10 @@ LOG_LEVEL=info
 Zentrale Konfigurationsdatei — kann sicher in Git eingecheckt werden.
 Alle Optionen sind inline kommentiert.
 
+**Zwei Drucker-Modi:**
+- **Einzel-Modus** — `printerHost` direkt, alle Etiketten auf einen Drucker
+- **Routing-Modus** — `labels{}`, jeder Etikettentyp auf eigenen Drucker/Layout
+
 ```javascript
 module.exports = {
 
@@ -113,11 +120,11 @@ module.exports = {
     activeMs: 5000,       // Intervall nach erkanntem Job
     activeTtlMs: 300000,  // Aktiv-Modus Dauer nach letztem Job (5min)
     activeTimes: 'So:09:00-13:00',  // Globales Zeitfenster (leer = immer aktiv)
-    maxErrors: 10,        // Fehler bis Dienst sich neu startet
+    maxErrors: 10,
   },
 
   printer: {
-    labelType: '54',                    // 54mm Endlosband
+    labelType: '54',                    // Nur Einzel-Modus
     layoutFile: './label-layout.json',
     timeoutMs: 5000,
   },
@@ -130,46 +137,84 @@ module.exports = {
   },
 
   logging: {
-    dir: './logs',          // Logfile-Verzeichnis (täglich rotiert)
-    retentionDays: 14,      // Aufbewahrung in Tagen
+    dir: './logs',
+    retentionDays: 14,
   },
 
   printers: [
+
+    // ── Einzel-Modus ──────────────────────────────────────────────────────
     {
-      hostname: 'B2',           // Technischer Bezeichner / Raumnummer
-      printerName: 'Minis',     // Anzeigename — erscheint in CT als "Minis (B2)"
+      hostname: 'B2',
+      printerName: 'Minis',         // erscheint in CT als "Minis (B2)"
       printerHost: '192.168.1.50',
       printerPort: 9100,
-      activeTimes: 'So:09:00-12:00 18:00-20:00',  // drucker-spezifisches Zeitfenster
-
-      // Drucker-Check
-      checkEnabled: true,             // false = Check überspringen
-      checkRetryIntervalMs: 30000,    // Retry-Intervall wenn offline/fehlerhaft
-
-      // Status-Webhook bei Drucker-Fehler/Warnung (siehe statusWebhooks[])
+      activeTimes: 'So:09:00-12:00 18:00-20:00',
+      checkEnabled: true,
+      checkRetryIntervalMs: 30000,
       statusWebhook: true,
-
-      // Retry-Queue für fehlgeschlagene Druckaufträge
       printQueue: {
-        maxRetries: 5,              // Max. Versuche bevor Job verworfen
-        maxAgeMs: 1800000,          // Max. Alter in ms (30min)
-        retryDelayMs: 30000,        // Wie oft Drucker-Status prüfen
-        retryOnPrintError: true,    // Auch bei Druckfehler in Queue
+        maxRetries: 5,
+        maxAgeMs: 1800000,
+        retryDelayMs: 30000,
+        retryOnPrintError: true,
+      },
+    },
+
+    // ── Routing-Modus ─────────────────────────────────────────────────────
+    {
+      hostname: 'A1',
+      printerName: 'Foyer',
+      activeTimes: 'So:09:00-13:00',
+      checkEnabled: true,
+      checkRetryIntervalMs: 30000,
+      statusWebhook: true,
+      printQueue: {
+        maxRetries: 5,
+        maxAgeMs: 1800000,
+        retryDelayMs: 30000,
+        retryOnPrintError: true,
+      },
+
+      labels: {
+        parent: {
+          printerHost: '192.168.1.51',
+          printerPort: 9100,
+          labelType:   '54',
+          rotate:      '0',        // '0' | '90' | '180' | '270'
+          enabled:     true,
+          copies:      1,
+          also:        ['leader'], // zusätzlich leader drucken
+        },
+        leader: {
+          printerHost: '192.168.1.51',
+          printerPort: 9100,
+          labelType:   '54',
+          rotate:      '0',
+          enabled:     true,
+          copies:      1,
+        },
+        child: {
+          printerHost: '192.168.1.52',
+          printerPort: 9100,
+          labelType:   '60x86',   // DK-11234
+          rotate:      '0',
+          enabled:     true,
+          copies:      1,
+        },
       },
     },
   ],
 
-  // Check-In Webhooks — nach jedem Druckauftrag
   webhooks: [
     { name: 'Prod', url: 'https://meinserver.ch/webhook', method: 'POST',
       secret: 'token', retry: 3, retryMs: 2000, enabled: true },
   ],
 
   webhookOptions: {
-    blockPrint: false,  // true = Druck wartet auf Webhook
+    blockPrint: false,
   },
 
-  // Status-Webhooks — für Drucker-Events (Fehler, Warnung, Bereit)
   statusWebhooks: [
     { name: 'Alert', url: 'https://meinserver.ch/printer/alert', method: 'POST',
       secret: null, retry: 3, retryMs: 2000, enabled: false },
@@ -186,6 +231,40 @@ In ChurchTools erscheint der Drucker als **`printerName (hostname)`**, z.B. `Min
 | `hostname` | Technischer Bezeichner / Raumnummer — von CT intern verwendet | `B2` |
 | `printerName` | Anzeigename / Raumname | `Minis` |
 
+#### Routing-Modus
+
+`labels{}` aktiviert den Routing-Modus. Jeder Key entspricht dem `type`-Feld im CT-Etikettentemplate.
+
+| Feld | Beschreibung |
+|---|---|
+| `printerHost` | IP des physischen Druckers |
+| `labelType` | brother_ql Label-Identifier (z.B. `54`, `60x86`) |
+| `rotate` | Rotation: `'0'`, `'90'`, `'180'`, `'270'` |
+| `enabled` | `false` = Etikett deaktiviert |
+| `copies` | Anzahl Kopien |
+| `also` | Zusätzliche Etikettentypen mit denselben Job-Daten drucken |
+
+**Gleichzeitiger Druck:** verschiedene Drucker parallel, gleicher Drucker sequenziell.
+
+**Beim Start:** alle physischen Drucker des Standorts müssen bereit sein vor Anmeldung.
+
+#### `also[]` — Zusätzliche Etiketten
+
+Wenn CT nur ein Template erlaubt aber zwei verschiedene Layouts gedruckt werden sollen:
+
+```javascript
+parent: {
+  printerHost: '192.168.1.51',
+  labelType: '54',
+  also: ['leader'],   // druckt automatisch auch leader-Layout
+},
+leader: {
+  printerHost: '192.168.1.51',
+  labelType: '54',
+  // eigenes Layout in label-layout.json["leader"]
+},
+```
+
 #### Drucker-Check
 
 Vor jeder Anmeldung wird der Drucker via TCP-Ping und Brother Web-API geprüft:
@@ -198,8 +277,6 @@ Vor jeder Anmeldung wird der Drucker via TCP-Ping und Brother Web-API geprüft:
 | `checkEnabled: false` | Direkt anmelden ohne Check |
 
 #### Retry-Queue
-
-Fehlgeschlagene Druckaufträge werden pro Etikett in eine Queue aufgenommen:
 
 | Konfiguration | Beschreibung |
 |---|---|
@@ -215,27 +292,16 @@ Fehlgeschlagene Druckaufträge werden pro Etikett in eine Queue aufgenommen:
 | `printer.error` | Kritischer Fehler (Band leer, Deckel offen etc.) |
 | `printer.warning` | Warnung (nicht kritisch) |
 | `printer.ready` | Drucker wieder bereit nach Fehler |
-| `printer.job_expired` | Job aus Queue verworfen (zu alt / zu viele Versuche) |
-
-```json
-{
-  "event": "printer.error",
-  "timestamp": 1713355078,
-  "printer": { "name": "Minis", "hostname": "B2", "host": "192.168.1.50", "port": 9100 },
-  "status": { "reachable": true, "ok": false, "errors": ["Band leer"], "warnings": [] }
-}
-```
+| `printer.job_expired` | Job aus Queue verworfen |
 
 #### Zeitfenster — activeTimes Format
 
-Tagkürzel: `Mo` `Di`/`Tu` `Mi`/`We` `Do`/`Th` `Fr` `Sa` `So`/`Su` — Bereiche wie `Mo-Fr` werden expandiert.
-
 ```javascript
-activeTimes: 'So:09:00-12:00'                        // Sonntag, ein Fenster
-activeTimes: 'So:09:00-12:00 18:00-20:00'            // Sonntag, zwei Fenster
-activeTimes: 'Mo-Fr:08:00-17:00,So:09:00-12:00'      // Werktags + Sonntag
-activeTimes: ''                                       // immer aktiv
-// activeTimes: null                                  // immer aktiv (ignoriert globales)
+activeTimes: 'So:09:00-12:00'
+activeTimes: 'So:09:00-12:00 18:00-20:00'
+activeTimes: 'Mo-Fr:08:00-17:00,So:09:00-12:00'
+activeTimes: ''           // immer aktiv
+// activeTimes: null      // immer aktiv (ignoriert globales)
 ```
 
 #### Check-In Webhook-Payload
@@ -261,13 +327,14 @@ activeTimes: ''                                       // immer aktiv
 
 ### label-layout.json
 
-Definiert Layout und Inhalt für `parent`- und `child`-Etiketten.
+Definiert Layout und Inhalt pro Etikettentyp. Der Key entspricht dem `type`-Feld aus CT (`parent`, `child`, `leader` etc.).
 
 **Block-Typen:**
 
 | type | Felder | Beschreibung |
 |---|---|---|
 | `text` | `field`, `font_size`, `bold`, `align`, `prefix`, `gap_after_mm` | Textfeld aus CT-Daten |
+| `static` | `value`, `font_size`, `bold`, `align`, `gap_after_mm` | Fixer Freitext |
 | `logo` | `image`, `height_mm`, `align`, `gap_after_mm` | Bilddatei (PNG/JPG) |
 | `qr` | `size_mm`, `align`, `gap_after_mm` | QR-Code aus SHA1-Hash |
 
@@ -278,24 +345,34 @@ Definiert Layout und Inhalt für `parent`- und `child`-Etiketten.
 ```json
 {
   "parent": {
-    "length_mm": 80,
+    "length_mm": 50,
     "padding_mm": 2,
     "line_spacing_mm": 0.8,
     "blocks": [
-      { "type": "logo", "image": "logo.png", "height_mm": 10, "align": "left", "gap_after_mm": 2 },
-      { "type": "text", "field": "id",   "font_size": 52, "bold": true,  "align": "left", "gap_after_mm": 2 },
-      { "type": "text", "field": "name", "font_size": 36, "bold": false, "align": "left", "gap_after_mm": 0 },
-      { "type": "text", "field": "code", "font_size": 36, "bold": false, "align": "left", "gap_after_mm": 2, "prefix": "Abholcode: " },
-      { "type": "qr",   "size_mm": 20,  "align": "left", "gap_after_mm": 0 }
+      { "type": "logo",   "image": "logo.png", "height_mm": 10, "align": "left", "gap_after_mm": 2 },
+      { "type": "text",   "field": "id",    "font_size": 52, "bold": true,  "gap_after_mm": 2 },
+      { "type": "text",   "field": "name",  "font_size": 36, "bold": false, "gap_after_mm": 0 },
+      { "type": "text",   "field": "code",  "font_size": 36, "bold": false, "gap_after_mm": 2, "prefix": "Abholcode: " },
+      { "type": "qr",     "size_mm": 20,   "align": "left", "gap_after_mm": 0 }
+    ]
+  },
+  "leader": {
+    "length_mm": 50,
+    "padding_mm": 2,
+    "line_spacing_mm": 0.8,
+    "blocks": [
+      { "type": "static", "value": "Leiter", "font_size": 24, "bold": true, "align": "center", "gap_after_mm": 2 },
+      { "type": "text",   "field": "name",  "font_size": 36, "bold": false, "gap_after_mm": 0 },
+      { "type": "text",   "field": "code",  "font_size": 36, "bold": false, "gap_after_mm": 0, "prefix": "Abholcode: " }
     ]
   },
   "child": {
-    "length_mm": 60,
+    "length_mm": 50,
     "padding_mm": 2,
     "line_spacing_mm": 0.8,
     "blocks": [
-      { "type": "text", "field": "name", "font_size": 52, "bold": true,  "align": "left", "gap_after_mm": 2 },
-      { "type": "text", "field": "code", "font_size": 36, "bold": false, "align": "left", "gap_after_mm": 0, "prefix": "Abholcode: " }
+      { "type": "text",   "field": "name",  "font_size": 52, "bold": true,  "gap_after_mm": 2 },
+      { "type": "text",   "field": "code",  "font_size": 36, "bold": false, "gap_after_mm": 0, "prefix": "Abholcode: " }
     ]
   }
 }
@@ -316,24 +393,21 @@ DRY_RUN=true npm start       # Dry-Run (speichert label_preview_N_type.png)
 ## Systemdienst (Autostart)
 
 ```bash
-# Service-Datei anpassen (User und WorkingDirectory prüfen)
-nano checkin-printer.service
+nano checkin-printer.service   # User und WorkingDirectory prüfen
 
-# Installieren und aktivieren
 sudo cp checkin-printer.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable checkin-printer
 sudo systemctl start checkin-printer
 
-# Status und Logs
 sudo systemctl status checkin-printer
 sudo journalctl -u checkin-printer -f
 ```
 
 ```bash
-sudo systemctl stop checkin-printer      # stoppen
-sudo systemctl restart checkin-printer   # neu starten
-sudo systemctl disable checkin-printer   # Autostart deaktivieren
+sudo systemctl stop checkin-printer
+sudo systemctl restart checkin-printer
+sudo systemctl disable checkin-printer
 ```
 
 ---
@@ -344,7 +418,7 @@ sudo systemctl disable checkin-printer   # Autostart deaktivieren
 node diagnose.js
 ```
 
-Meldet den Drucker an, wartet auf einen Check-In und speichert den rohen Job-Payload in `job-dump.json` — nützlich um das CT-Format zu analysieren ohne den Drucker zu benötigen.
+Meldet den Drucker an, wartet auf einen Check-In und speichert den rohen Job-Payload in `job-dump.json`.
 
 ---
 
@@ -360,8 +434,6 @@ Meldet den Drucker an, wartet auf einen Check-In und speichert den rohen Job-Pay
 | 🔕 Fenster schliesst | `hidePrinter` → Polling pausiert → Session-Renewal pausiert |
 | 🔴 MAX_ERRORS Fehler | Drucker abmelden → `process.exit(1)` → systemd startet neu |
 
-Jeder Drucker hat seinen eigenen unabhängigen Modus.
-
 ---
 
 ## Troubleshooting
@@ -369,7 +441,6 @@ Jeder Drucker hat seinen eigenen unabhängigen Modus.
 **Drucker erscheint nicht in ChurchTools**
 ```bash
 LOG_LEVEL=debug npm start
-# Prüfe: activatePrinter success: true?
 # hostname in config.js muss eindeutig sein
 ```
 
@@ -378,7 +449,7 @@ LOG_LEVEL=debug npm start
 nc -zv 192.168.1.50 9100
 ```
 
-**Brother Web-Status manuell prüfen**
+**Brother Web-Status prüfen**
 ```bash
 curl http://192.168.1.50/general/status.html | grep -E "moni|Media|Emulation"
 ```
@@ -386,7 +457,7 @@ curl http://192.168.1.50/general/status.html | grep -E "moni|Media|Emulation"
 **Etikett-Vorschau ohne Drucker**
 ```bash
 DRY_RUN=true npm start
-# → label_preview_1_parent.png, label_preview_2_child.png
+# → label_preview_N_type.png
 ```
 
 **Alle verfügbaren Label-Typen**
@@ -394,17 +465,10 @@ DRY_RUN=true npm start
 python3 -c "from brother_ql.labels import ALL_LABELS; [print(l.identifier, l.name) for l in ALL_LABELS]"
 ```
 
-**ChurchTools-Verbindung testen**
-```bash
-curl -X POST https://meinegemeinde.church.tools/api/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"user@mail.ch","password":"passwort"}'
-```
-
 **Queue-Status prüfen**
 ```bash
 LOG_LEVEL=debug npm start
-# Queue-Monitor und flush werden im Debug-Log sichtbar
+# Queue-Monitor und flush im Debug-Log sichtbar
 ```
 
 ---
@@ -424,47 +488,49 @@ LOG_LEVEL=debug npm start
       (Drucker 1)    (Drucker 2)      (Drucker n)
           │
           ├──→ ChurchToolsClient ──→ ChurchTools oldApi
-          │         │                (getNextPrinterJob)
           │         └── Session-Renewal alle 23h
           │
           ├──→ PrinterChecker ──→ TCP-Ping + Brother Web-API
           │
-          ├──→ PrinterManager
+          ├──→ PrinterManager (Einzel-Modus)
           │         │  enrichJobs() → QR-Hash, Timestamp
-          │         └──→ print_label.py
-          │                   │  label-layout.json → render
-          │                   │  Pillow → PNG
-          │                   │  brother_ql → Raster
-          │                   └──→ TCP 9100 → Labeldrucker
+          │         └──→ print_label.py → TCP 9100 → Drucker
+          │
+          ├──→ LabelRouter (Routing-Modus)
+          │         │  type-Feld → Route → physischer Drucker
+          │         │  also[] → zusätzliche Etiketten
+          │         └──→ print_label.py (parallel/sequenziell)
           │
           ├──→ PrintQueue ──→ Retry bei Druckfehler
           │
-          ├──→ WebhookService ──→ HTTP POST/PUT (Check-In Events)
+          ├──→ WebhookService ──→ Check-In Events
           │
-          └──→ StatusWebhookService ──→ HTTP POST/PUT (Drucker-Events)
+          └──→ StatusWebhookService ──→ Drucker-Events
 ```
 
 ### Dateien
 
 | Datei | Aufgabe |
 |---|---|
-| `config.js` | Zentrale Konfiguration (Drucker, Webhooks, Polling, Mapping) |
-| `label-layout.json` | Etikett-Layout (Blöcke, Schriften, Logo, QR-Code) |
+| `config.js` | Zentrale Konfiguration |
+| `label-layout.json` | Etikett-Layout pro Typ |
 | `.env` | Secrets (CT-Credentials, Log-Level) |
+| `requirements.txt` | Python-Abhängigkeiten |
 | `src/index.js` | Einstiegspunkt |
-| `src/config.js` | Lädt und validiert `.env` + `config.js` |
+| `src/config.js` | Lädt `.env` + `config.js` |
 | `src/churchtools-client.js` | Login, Session-Management, oldApi |
-| `src/printer-manager.js` | Jobs anreichern, Python aufrufen |
+| `src/printer-manager.js` | Einzel-Modus: Jobs anreichern, Python aufrufen |
+| `src/label-router.js` | Routing-Modus: type-Feld → Drucker |
 | `src/printer-checker.js` | TCP-Ping + Brother Web-API Status |
-| `src/print-queue.js` | Retry-Queue für fehlgeschlagene Jobs |
+| `src/print-queue.js` | Retry-Queue |
 | `src/job-poller.js` | Polling-Loop, Zeitfenster, Queue, Webhooks |
-| `src/schedule.js` | Zeitfenster parsen und auswerten |
-| `src/webhook-service.js` | Check-In Webhooks mit Retry |
-| `src/status-webhook-service.js` | Status-Webhooks für Drucker-Events |
-| `src/printers-config.js` | Drucker-Liste aus config.js laden |
-| `src/logger.js` | Logging mit Timestamps und Datei-Rotation |
+| `src/schedule.js` | Zeitfenster parsen |
+| `src/webhook-service.js` | Check-In Webhooks |
+| `src/status-webhook-service.js` | Status-Webhooks |
+| `src/printers-config.js` | Drucker-Liste laden |
+| `src/logger.js` | Logging + Datei-Rotation |
 | `print_label.py` | Text → PNG → Brother Raster → TCP |
-| `diagnose.js` | Anmeldung testen, Job-Format erfassen |
+| `diagnose.js` | Diagnose-Script |
 
 ---
 
@@ -475,6 +541,7 @@ LOG_LEVEL=debug npm start
 | Brother QL-720NWB | ✅ |
 | Brother QL-820NWB | ✅ |
 | DK-N55224 (54mm, nicht-klebend) | ✅ |
+| DK-11234 (60x86mm, selbstklebend) | ✅ |
 | Raspberry Pi / Debian | ✅ |
 
 ---

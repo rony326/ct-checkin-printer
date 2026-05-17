@@ -1,7 +1,7 @@
 # Dependencies
 node_modules/
 
-# Environment (enthält Passwörter — nie in Git!)
+# Environment
 .env
 
 # Dry-Run Vorschauen
