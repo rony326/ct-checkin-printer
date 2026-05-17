@@ -195,7 +195,7 @@ def load_logo(image_path, height_px, print_width, padding):
 
 # ── Rendern ───────────────────────────────────────────────────────────────────
 
-def render_label(parsed, layout_def, print_width, qr_hash=None, exact_height_px=None):
+def render_label(parsed, layout_def, print_width, qr_hash=None, exact_height_px=None, rotate_content=0):
     length_mm       = layout_def.get('length_mm', 50)
     padding_mm      = layout_def.get('padding_mm', 2)
     line_spacing_mm = layout_def.get('line_spacing_mm', 0.8)
@@ -206,10 +206,20 @@ def render_label(parsed, layout_def, print_width, qr_hash=None, exact_height_px=
     padding = mm_to_px(padding_mm)
     line_sp = mm_to_px(line_spacing_mm)
 
-    img  = Image.new('L', (print_width, label_h), 255)
+    # Bei Inhalt-Rotation: zuerst auf gedrehter Leinwand rendern, dann zurückdrehen
+    # Die finale Bildgrösse bleibt immer (print_width x label_h)
+    if rotate_content in (90, 270):
+        # Rendern auf umgekehrter Leinwand (Höhe wird zur Breite)
+        render_w, render_h = label_h, print_width
+    else:
+        render_w, render_h = print_width, label_h
+
+    img  = Image.new('L', (render_w, render_h), 255)
     draw = ImageDraw.Draw(img)
 
     y = padding
+    # Breite für Inhaltsrendering anpassen
+    content_width = render_w
 
     for block in blocks_def:
         block_type = block.get('type', 'text')
@@ -257,9 +267,9 @@ def render_label(parsed, layout_def, print_width, qr_hash=None, exact_height_px=
                 continue
 
             if align == 'center':
-                x = (print_width - logo_w) // 2
+                x = (content_width - logo_w) // 2
             elif align == 'right':
-                x = print_width - padding - logo_w
+                x = content_width - padding - logo_w
             else:
                 x = padding
 
@@ -280,9 +290,9 @@ def render_label(parsed, layout_def, print_width, qr_hash=None, exact_height_px=
                 h    = bbox[3] - bbox[1]
                 if y + h <= label_h - padding:
                     if align == 'center':
-                        x = (print_width - w) // 2
+                        x = (content_width - w) // 2
                     elif align == 'right':
-                        x = print_width - padding - w
+                        x = content_width - padding - w
                     else:
                         x = padding
                     draw.text((x, y), value, font=font, fill=0)
@@ -311,9 +321,9 @@ def render_label(parsed, layout_def, print_width, qr_hash=None, exact_height_px=
                 if y + h > label_h - padding:
                     break
                 if align == 'center':
-                    x = (print_width - w) // 2
+                    x = (content_width - w) // 2
                 elif align == 'right':
-                    x = print_width - padding - w
+                    x = content_width - padding - w
                 else:
                     x = padding
                 draw.text((x, y), text, font=font, fill=0)
@@ -323,6 +333,16 @@ def render_label(parsed, layout_def, print_width, qr_hash=None, exact_height_px=
             if rendered:
                 y += gap_after
 
+    # Inhalt rotieren und auf finale Leinwand setzen
+    if rotate_content in (90, 180, 270):
+        img = img.rotate(-rotate_content, expand=True)
+        # Bei 90/270: Bild auf finale Leinwand (print_width x label_h) zentrieren
+        final = Image.new('L', (print_width, label_h), 255)
+        paste_x = (print_width - img.width) // 2
+        paste_y = (label_h - img.height) // 2
+        final.paste(img, (paste_x, paste_y))
+        return final.convert('1')
+
     return img.convert('1')
 
 # ── Drucken ───────────────────────────────────────────────────────────────────
@@ -330,7 +350,12 @@ def render_label(parsed, layout_def, print_width, qr_hash=None, exact_height_px=
 def print_images(images, host, port, label_type):
     qlr = BrotherQLRaster('QL-720NW')
     qlr.exception_on_warning = False
-    convert(qlr=qlr, images=images, label=label_type, rotate=args.rotate,
+    # Für Die-Cut Labels: Rotation wurde bereits im Bild angewendet → rotate='0'
+    # Für Endlosbänder: Rotation via brother_ql (ändert Bild-Dimensionen)
+    label_info_obj = next((l for l in ALL_LABELS if l.identifier == label_type), None)
+    is_die_cut = label_info_obj and label_info_obj.dots_printable[1] > 0
+    effective_rotate = '0' if is_die_cut else args.rotate
+    convert(qlr=qlr, images=images, label=label_type, rotate=effective_rotate,
             threshold=70.0, dither=False, compress=False,
             red=args.red, dpi_600=False, hq=True, cut=True)
     backend = BrotherQLBackendNetwork('tcp://{}:{}'.format(host, port))
@@ -399,7 +424,10 @@ def main():
 
             # Die-Cut Labels: exakte Höhe aus label_info nehmen
             exact_h = label_info.dots_printable[1] if len(label_info.dots_printable) > 1 else None
-            img = render_label(parsed, layout_def, print_width, qr_hash=qr_hash, exact_height_px=exact_h)
+            # Rotation: für Die-Cut Labels Inhalt rotieren, Bild-Dimensionen bleiben fix
+            rotate_deg = int(args.rotate) if args.rotate in ('0', '90', '180', '270') else 0
+            img = render_label(parsed, layout_def, print_width, qr_hash=qr_hash,
+                               exact_height_px=exact_h, rotate_content=rotate_deg)
             images.append((img, label_key, i+1))
 
         except Exception as e:
