@@ -35,6 +35,7 @@ parser.add_argument('--layout',  default='label-layout.json')
 parser.add_argument('--mapping',      default='field-mapping.json')
 parser.add_argument('--mapping-json', default=None, help='Field-Mapping als JSON-String (überschreibt --mapping)')
 parser.add_argument('--rotate',   default='0',  help='Rotation: 0, 90, 180, 270')
+parser.add_argument('--red',      action='store_true', help='Schwarz/Rot Modus (benötigt für QL-820NWB mit bestimmten Rollen)')
 parser.add_argument('--dry-run',  action='store_true')
 args = parser.parse_args()
 
@@ -194,13 +195,14 @@ def load_logo(image_path, height_px, print_width, padding):
 
 # ── Rendern ───────────────────────────────────────────────────────────────────
 
-def render_label(parsed, layout_def, print_width, qr_hash=None):
+def render_label(parsed, layout_def, print_width, qr_hash=None, exact_height_px=None):
     length_mm       = layout_def.get('length_mm', 50)
     padding_mm      = layout_def.get('padding_mm', 2)
     line_spacing_mm = layout_def.get('line_spacing_mm', 0.8)
     blocks_def      = layout_def.get('blocks', [])
 
-    label_h = mm_to_px(length_mm)
+    # Bei Die-Cut Labels exakte Pixelhöhe aus label_info verwenden
+    label_h = exact_height_px if exact_height_px else mm_to_px(length_mm)
     padding = mm_to_px(padding_mm)
     line_sp = mm_to_px(line_spacing_mm)
 
@@ -264,6 +266,28 @@ def render_label(parsed, layout_def, print_width, qr_hash=None):
             img.paste(logo, (x, y))
             y += logo_h + gap_after
 
+        # ── Static-Block (Freitext) ───────────────────────────────────────────
+        elif block_type == 'static':
+            font_size = block.get('font_size', 28)
+            bold      = block.get('bold', False)
+            align     = block.get('align', 'left')
+            value     = block.get('value', '')
+            font      = get_font(font_size, bold)
+
+            if value:
+                bbox = draw.textbbox((0, 0), value, font=font)
+                w    = bbox[2] - bbox[0]
+                h    = bbox[3] - bbox[1]
+                if y + h <= label_h - padding:
+                    if align == 'center':
+                        x = (print_width - w) // 2
+                    elif align == 'right':
+                        x = print_width - padding - w
+                    else:
+                        x = padding
+                    draw.text((x, y), value, font=font, fill=0)
+                    y += h + gap_after
+
         # ── Text-Block ────────────────────────────────────────────────────────
         else:
             field     = block.get('field', '')
@@ -308,7 +332,7 @@ def print_images(images, host, port, label_type):
     qlr.exception_on_warning = False
     convert(qlr=qlr, images=images, label=label_type, rotate=args.rotate,
             threshold=70.0, dither=False, compress=False,
-            red=False, dpi_600=False, hq=True, cut=True)
+            red=args.red, dpi_600=False, hq=True, cut=True)
     backend = BrotherQLBackendNetwork('tcp://{}:{}'.format(host, port))
     backend.write(qlr.data)
     backend.dispose()
@@ -349,22 +373,33 @@ def main():
         if not text:
             continue
         try:
-            parsed     = parse_ct_text(text, mapping)
-            is_parent  = parsed['is_parent']
-            label_key  = 'parent' if is_parent else 'child'
+            parsed    = parse_ct_text(text, mapping)
+            qr_hash   = job.get('qr_hash')
+
+            # Layout-Key: zuerst aus parsed_fields im Job (gesetzt vom Router via also[]),
+            # dann aus dem geparsten type-Feld, dann Fallback auf parent/child
+            job_type   = (job.get('parsed_fields') or {}).get('type') or ''
+            type_field = job_type or parsed.get('type') or ''
+            if type_field and type_field in layout:
+                label_key = type_field
+            elif parsed['is_parent']:
+                label_key = 'parent'
+            else:
+                label_key = 'child'
             layout_def = layout.get(label_key, layout.get('child', {}))
-            qr_hash    = job.get('qr_hash')
 
             print('Job #{}: {} | name={} | code={} | qr={} | {}mm'.format(
                 i+1,
-                'Eltern' if is_parent else 'Kind',
+                label_key,
                 parsed.get('name') or '?',
                 parsed.get('code') or '?',
                 qr_hash[:8] + '...' if qr_hash else 'kein',
                 layout_def.get('length_mm', 50),
             ), file=sys.stderr)
 
-            img = render_label(parsed, layout_def, print_width, qr_hash=qr_hash)
+            # Die-Cut Labels: exakte Höhe aus label_info nehmen
+            exact_h = label_info.dots_printable[1] if len(label_info.dots_printable) > 1 else None
+            img = render_label(parsed, layout_def, print_width, qr_hash=qr_hash, exact_height_px=exact_h)
             images.append((img, label_key, i+1))
 
         except Exception as e:

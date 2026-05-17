@@ -131,9 +131,27 @@ class LabelRouter {
         continue;
       }
 
+      // Hauptroute hinzufügen
       const hostKey = `${route.printerHost}:${route.printerPort || 9100}`;
       if (!byHost.has(hostKey)) byHost.set(hostKey, []);
-      byHost.get(hostKey).push({ job, route });
+      byHost.get(hostKey).push({ job, route, printAs: labelType });
+
+      // also[] — zusätzliche Etiketten mit demselben Job-Daten aber anderem Layout
+      if (Array.isArray(route.also)) {
+        for (const alsoType of route.also) {
+          const alsoRoute = this.getRoute(alsoType);
+          if (!alsoRoute) {
+            logger.warn(`also: Keine Route für "${alsoType}" — übersprungen`);
+            continue;
+          }
+          const alsoKey = `${alsoRoute.printerHost}:${alsoRoute.printerPort || 9100}`;
+          if (!byHost.has(alsoKey)) byHost.set(alsoKey, []);
+          // Job mit überschriebenem type damit das richtige Layout verwendet wird
+          const alsoJob = { ...job, parsed_fields: { ...job.parsed_fields, type: alsoType } };
+          byHost.get(alsoKey).push({ job: alsoJob, route: alsoRoute, printAs: alsoType });
+          logger.info(`also: Job ${job.id} wird zusätzlich als "${alsoType}" gedruckt`);
+        }
+      }
     }
 
     // Alle Drucker parallel bedienen
@@ -188,7 +206,8 @@ class LabelRouter {
 
     if (this.dryRun) args.push('--dry-run');
 
-    logger.info(`Routing: Job ${job.id} (${job.parsed_fields?.type}) → ${route.printerHost}:${route.printerPort || 9100} (${route.labelType || '54'})`);
+    const printAs = job.parsed_fields?.type || 'unknown';
+    logger.info(`Routing: Job ${job.id} (${printAs}) → ${route.printerHost}:${route.printerPort || 9100} (${route.labelType || '54'})`);
     logger.debug('Python:', args.slice(1).join(' '));
 
     return new Promise((resolve, reject) => {

@@ -60,6 +60,7 @@ function loadPrinters(raw, globalActiveTimes, parseSchedule) {
             rotate:      String(route.rotate || '0'),
             enabled:     route.enabled !== false,
             copies:      Math.max(1, parseInt(route.copies || 1, 10)),
+            also:        Array.isArray(route.also) ? route.also : [],
           };
         }
       }

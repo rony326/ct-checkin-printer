@@ -145,6 +145,7 @@ module.exports = {
           rotate:      '0',              // '0' | '90' | '180' | '270'
           enabled:     true,             // false = Etikett deaktivieren
           copies:      1,                // Anzahl Kopien
+          also:        ['leader'],  // ← neu
         },
 
         // Leiter-Etikett → gleicher Drucker wie parent (sequenziell)
