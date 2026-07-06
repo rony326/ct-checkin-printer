@@ -155,7 +155,7 @@ class JobPoller {
     const checkEnabled = this.config.PRINTER_CHECK_ENABLED !== false;
     const isRouting    = this.config.IS_ROUTING_MODE || false;
 
-    // Drucker-Status vor dem Druck prüfen (nur Einzel-Modus)
+    // Drucker-Status vor dem Druck prüfen (Einzel-Modus)
     // Routing-Modus: Checks laufen beim Start und Zeitfenster-Wechsel
     if (checkEnabled && !isRouting && printerHost) {
       const status = await checkPrinter(printerHost, printerPort, this.config.PRINTER_TIMEOUT_MS || 5000);
@@ -185,6 +185,30 @@ class JobPoller {
         this._startQueueMonitor();
         return;
       }
+    }
+
+    // Drucker-Status vor dem Druck prüfen (Routing-Modus)
+    // Prüft alle physischen Drucker die im Routing verwendet werden und meldet
+    // Fehler per Status-Webhook. Druck wird trotzdem versucht — LabelRouter
+    // druckt auf gesunde Drucker weiter und meldet nur die betroffenen Jobs
+    // als fehlgeschlagen (landen unten in der Queue).
+    if (checkEnabled && isRouting && typeof this.printer.getUniqueHosts === 'function') {
+      const hosts = this.printer.getUniqueHosts();
+
+      await Promise.all(hosts.map(async ({ host, port }) => {
+        const status = await checkPrinter(host, port, this.config.PRINTER_TIMEOUT_MS || 5000);
+        if (!status.reachable || status.errors.length > 0) {
+          logger.warn(`Drucker ${host}:${port} nicht bereit: ${status.toString()}`);
+          if (this.statusWebhook?.enabled) {
+            this.statusWebhook.send('printer.error', {
+              printerName: this.config.PRINTER_NAME,
+              hostname:    this.config.HOSTNAME,
+              printerHost: host,
+              printerPort: port,
+            }, status);
+          }
+        }
+      }));
     }
 
     // Drucker bereit — drucken (Einzel oder Routing)
@@ -250,19 +274,41 @@ class JobPoller {
       return;
     }
 
-    const printerHost  = this.config.PRINTER_HOST;
-    const printerPort  = this.config.PRINTER_PORT || 9100;
+    const isRouting    = this.config.IS_ROUTING_MODE || false;
     const retryDelayMs = this.config.PRINT_QUEUE?.retryDelayMs
       || this.printer.queueConfig?.retryDelayMs
       || 30000;
 
-    // Drucker-Status prüfen
-    const status = await checkPrinter(printerHost, printerPort, this.config.PRINTER_TIMEOUT_MS || 5000);
+    let status, printerHost, printerPort;
 
-    if (!status.reachable || status.errors.length > 0) {
-      logger.debug(`Queue-Monitor: Drucker noch nicht bereit (${status.toString()}) — retry in ${retryDelayMs / 1000}s`);
-      this._scheduleQueueCheck(retryDelayMs);
-      return;
+    if (isRouting && typeof this.printer.getUniqueHosts === 'function') {
+      // Routing-Modus: PRINTER_HOST ist null (es gibt keinen einzelnen Drucker) —
+      // alle physischen Drucker prüfen, die im Routing verwendet werden.
+      const hosts   = this.printer.getUniqueHosts();
+      const results = await Promise.all(hosts.map(async ({ host, port }) => ({
+        host, port, status: await checkPrinter(host, port, this.config.PRINTER_TIMEOUT_MS || 5000),
+      })));
+      const notReady = results.find(r => !r.status.reachable || r.status.errors.length > 0);
+
+      if (notReady) {
+        logger.debug(`Queue-Monitor: Drucker ${notReady.host}:${notReady.port} noch nicht bereit (${notReady.status.toString()}) — retry in ${retryDelayMs / 1000}s`);
+        this._scheduleQueueCheck(retryDelayMs);
+        return;
+      }
+
+      status      = results[0].status;
+      printerHost = null;
+      printerPort = null;
+    } else {
+      printerHost = this.config.PRINTER_HOST;
+      printerPort = this.config.PRINTER_PORT || 9100;
+      status      = await checkPrinter(printerHost, printerPort, this.config.PRINTER_TIMEOUT_MS || 5000);
+
+      if (!status.reachable || status.errors.length > 0) {
+        logger.debug(`Queue-Monitor: Drucker noch nicht bereit (${status.toString()}) — retry in ${retryDelayMs / 1000}s`);
+        this._scheduleQueueCheck(retryDelayMs);
+        return;
+      }
     }
 
     // Drucker wieder bereit — Queue leeren
@@ -312,8 +358,28 @@ class JobPoller {
       await this.client.ensureLogin();
 
       const checkEnabled = this.config.PRINTER_CHECK_ENABLED !== false;
+      const isRouting    = this.config.IS_ROUTING_MODE || false;
+
       if (!checkEnabled) {
         logger.info(`⏭️  Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
+      } else if (isRouting && typeof this.printer.getUniqueHosts === 'function') {
+        const retryMs      = this.config.PRINTER_CHECK_RETRY_MS || 30000;
+        const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS     || 5000;
+        const hosts        = this.printer.getUniqueHosts();
+
+        logger.info(`🔍 Routing-Modus: prüfe ${hosts.length} Drucker für "${printerName}"...`);
+        await Promise.all(hosts.map(async ({ host, port }) => {
+          const status = await waitForPrinterReady(host, port, retryMs, tcpTimeoutMs);
+
+          if (status.warnings.length > 0) {
+            logger.warn(`⚠️  ${host}:${port} Warnung: ${status.warnings.join(', ')}`);
+            if (this.statusWebhook?.enabled) {
+              this.statusWebhook.send('printer.warning', { printerName, hostname, printerHost: host, printerPort: port }, status);
+            }
+          } else {
+            logger.info(`✅ ${host}:${port} bereit`);
+          }
+        }));
       } else if (printerHost) {
         const retryMs      = this.config.PRINTER_CHECK_RETRY_MS || 30000;
         const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS     || 5000;

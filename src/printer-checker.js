@@ -56,12 +56,15 @@ function fetchWebStatus(host, timeoutMs = 5000) {
 }
 
 function decodeHtml(str) {
+  // &amp; muss als letztes ersetzt werden, sonst werden bereits ersetzte
+  // Entities (z.B. aus "&amp;lt;") von den folgenden .replace()-Aufrufen
+  // fälschlicherweise nochmals dekodiert (Double-Unescaping, CodeQL #16).
   return str
     .replace(/&#32;/g,  ' ')
-    .replace(/&amp;/g,  '&')
     .replace(/&lt;/g,   '<')
     .replace(/&gt;/g,   '>')
     .replace(/&quot;/g, '"')
+    .replace(/&amp;/g,  '&')
     .trim();
 }
 
