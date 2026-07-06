@@ -1,10 +1,12 @@
 'use strict';
 
-const https      = require('https');
-const http       = require('http');
-const fs         = require('fs');
-const path       = require('path');
-const { logger } = require('./logger');
+const https           = require('https');
+const http            = require('http');
+const fs              = require('fs');
+const path            = require('path');
+const { logger }      = require('./logger');
+const { resolveSecret } = require('./secrets');
+const { requireBoolean } = require('./validate');
 
 /**
  * StatusWebhookService — separater Webhook nur für Drucker-Status-Events.
@@ -38,7 +40,11 @@ class StatusWebhookService {
   _loadTargets(raw) {
     if (!Array.isArray(raw) || raw.length === 0) return [];
 
-    const active = raw.filter(t => t.url && t.enabled !== false && !t._comment);
+    const withoutComments = raw.filter(t => !t._comment);
+    const active = withoutComments.filter(t => {
+      const enabled = requireBoolean(t.enabled, `statusWebhooks["${t.name || t.url}"].enabled`, true);
+      return t.url && enabled;
+    });
     if (active.length === 0) return [];
 
     logger.info(`Status-Webhook: ${active.length} Ziel(e) aktiv`);
@@ -46,7 +52,7 @@ class StatusWebhookService {
     return active.map(t => ({
       url:     t.url,
       method:  (t.method  || 'POST').toUpperCase(),
-      secret:  t.secret   || null,
+      secret:  resolveSecret(t.secret) || null,
       retry:   parseInt(t.retry   ?? this.defaultRetry,   10),
       retryMs: parseInt(t.retryMs ?? t.retry_ms ?? this.defaultRetryMs, 10),
       name:    t.name || t.url,

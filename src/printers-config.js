@@ -1,5 +1,7 @@
 'use strict';
 
+const { requireBoolean } = require('./validate');
+
 /**
  * Lädt und validiert die Drucker-Liste aus config.js.
  *
@@ -53,13 +55,26 @@ function loadPrinters(raw, globalActiveTimes, parseSchedule) {
         labelRoutes = {};
         for (const [type, route] of Object.entries(entry.labels)) {
           if (!route.printerHost) throw new Error(`${label}.labels.${type}: "printerHost" fehlt`);
+
+          let copies = 1;
+          if (route.copies !== undefined && route.copies !== null && route.copies !== '') {
+            const parsedCopies = Number(route.copies);
+            if (!Number.isInteger(parsedCopies) || parsedCopies < 1) {
+              throw new Error(
+                `${label}.labels.${type}: "copies" muss eine positive ganze Zahl sein — ` +
+                `erhalten: ${JSON.stringify(route.copies)}`
+              );
+            }
+            copies = parsedCopies;
+          }
+
           labelRoutes[type] = {
             printerHost: route.printerHost,
             printerPort: route.printerPort || 9100,
             labelType:   route.labelType   || '54',
             rotate:      String(route.rotate || '0'),
-            enabled:     route.enabled !== false,
-            copies:      Math.max(1, parseInt(route.copies || 1, 10)),
+            enabled:     requireBoolean(route.enabled, `${label}.labels.${type}.enabled`, true),
+            copies,
             also:        Array.isArray(route.also) ? route.also : [],
           };
         }
@@ -82,16 +97,16 @@ function loadPrinters(raw, globalActiveTimes, parseSchedule) {
         labelRoutes,
 
         // Drucker-Check
-        checkEnabled:         entry.checkEnabled !== false,
+        checkEnabled:         requireBoolean(entry.checkEnabled, `${label}.checkEnabled`, true),
         checkRetryIntervalMs: entry.checkRetryIntervalMs ?? 30000,
-        statusWebhook:        entry.statusWebhook !== false,
+        statusWebhook:        requireBoolean(entry.statusWebhook, `${label}.statusWebhook`, true),
 
         // Retry-Queue
         printQueue: {
           maxRetries:        entry.printQueue?.maxRetries        ?? 5,
           maxAgeMs:          entry.printQueue?.maxAgeMs          ?? 1800000,
           retryDelayMs:      entry.printQueue?.retryDelayMs      ?? 30000,
-          retryOnPrintError: entry.printQueue?.retryOnPrintError !== false,
+          retryOnPrintError: requireBoolean(entry.printQueue?.retryOnPrintError, `${label}.printQueue.retryOnPrintError`, true),
         },
       };
     });

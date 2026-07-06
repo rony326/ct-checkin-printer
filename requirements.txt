@@ -7,6 +7,6 @@
 # Grund: bessere Unterstützung für QL-820NWB und DK-11234 (60x86mm)
 # Repo: https://github.com/matmair/brother_ql-inventree
 
-brother_ql-inventree
-Pillow
-qrcode
+brother_ql-inventree>=1.2,<2.0
+Pillow>=10.0,<11.0
+qrcode>=7.4,<8.0

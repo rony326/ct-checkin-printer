@@ -1,5 +1,70 @@
 # Changelog
 
+## [Unreleased] — 2026-07-06
+
+Umfassende Sicherheits-, Zuverlässigkeits- und Installations-Härtung nach
+einem vollständigen Audit des Tools. Für jeden Punkt existiert ein GitHub-Issue
+(#19–#32).
+
+### 🔒 Sicherheit
+
+- **Webhook-Secrets nicht mehr im Klartext in `config.js`** (#19) — `secret`
+  kann jetzt als `env:VAR_NAME` referenziert werden und wird zur Laufzeit aus
+  `.env` aufgelöst. `config.js` bleibt so git-versionierbar, ohne dass echte
+  Secrets mit eingecheckt werden.
+- **Strikte Boolean-Validierung für config.js** (#20) — Felder wie
+  `checkEnabled`, `statusWebhook`, `enabled` (Drucker/Routen/Webhooks),
+  `retryOnPrintError` und `blockPrint` akzeptieren nur noch echte
+  JS-Booleans. Ein versehentlicher String wie `"false"` (der bisher lautlos
+  als *aktiviert* interpretiert wurde) führt jetzt zu einem klaren
+  Konfigurationsfehler beim Start statt zu stillem Fehlverhalten.
+- **Personenbezogene Daten in Debug-Logs maskiert** (#30) — Namen und
+  Abholcodes werden in `print_label.py`- und Node-Debug-Ausgaben nicht mehr
+  im Klartext geloggt (nur noch erster Buchstabe + Länge bzw. interne Job-ID).
+
+### 🐛 Fixes
+
+- **Ein Drucker konnte den gesamten Dienst lahmlegen** (#21) — `MAX_ERRORS`
+  führte zu `process.exit(1)` und beendete damit *alle* Poller im Prozess.
+  Jetzt pausiert nur der betroffene Drucker (60s Cool-down), meldet sich
+  danach automatisch selbst wieder an und feuert einen neuen
+  `printer.fatal`-Status-Webhook. Andere Drucker laufen unbeeinträchtigt weiter.
+- **Ungültiger `copies`-Wert druckte lautlos 0 Etiketten** (#23) — z.B.
+  `copies: 'stk'` ergab intern `NaN` und die Kopie-Schleife lief nie durch,
+  ohne jede Fehlermeldung. Wird jetzt beim Start als Konfigurationsfehler
+  erkannt.
+- **Irreführende Zeitfenster-Logausgabe beim Start** (#24) — zeigte für
+  `activeTimes: ''` (erbt globales Zeitfenster) fälschlich "immer aktiv
+  (drucker-spezifisch)" an. Zeigt jetzt korrekt an, ob ein Drucker das
+  globale Zeitfenster erbt, ein eigenes hat, oder immer aktiv ist.
+- **Status-Webhook feuerte nicht zuverlässig bei nicht auswertbarem
+  Drucker-Status** (#22) — wenn die Weboberfläche des Druckers nicht auf
+  Englisch steht, wird jetzt einmalig pro Drucker gewarnt, statt fälschlich
+  "bereit" zu melden.
+
+### 🔧 Robustheit
+
+- **`ChurchToolsClient`-Interceptor-Guard** (#32) — verhindert lautloses
+  Duplizieren von Axios-Interceptoren, falls künftig mehr als eine Instanz
+  im selben Prozess erzeugt wird.
+- **Python-Interpreter-Pfad konfigurierbar** (`printer.pythonBin`, #29) —
+  ermöglicht ein isoliertes venv statt systemweiter Installation.
+- **Versions-Pins in `requirements.txt`** (#27) — `brother_ql-inventree`,
+  `Pillow`, `qrcode` waren völlig ungepinnt; künftige Breaking-Changes
+  konnten unbemerkt einfliessen.
+
+### 📝 Dokumentation
+
+- Hinweis auf notwendige englische Drucker-Web-UI-Sprache (#22).
+- `checkin-printer.service` und README erklären jetzt explizit, warum
+  `User=pi` und `/usr/bin/node` bei neueren Raspberry-Pi-OS-Images bzw.
+  nvm-Installationen angepasst werden müssen (#25, #26).
+- Installationsschritt gegen `brother_ql`/`brother_ql-inventree`-Namenskollision
+  ergänzt, optionale venv-Anleitung hinzugefügt (#28, #29).
+- `.npmrc` mit `engine-strict=true` — `npm install` bricht jetzt mit einer
+  klaren Fehlermeldung ab, statt dass zu altes Node.js erst beim Start mit
+  einem kryptischen `SyntaxError` scheitert (#31).
+
 ## v1.2.0 — 2026-05-13
 
 ### 🚀 Highlights

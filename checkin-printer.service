@@ -5,8 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# User/WorkingDirectory anpassen! "pi" existiert seit neueren Raspberry-Pi-OS-
+# Images (Bullseye+, Imager mit Pflicht-Custom-User) oft NICHT mehr.
+# Eigenen Usernamen ermitteln: whoami
 User=pi
 WorkingDirectory=/home/pi/checkin-printer
+# Node-Pfad anpassen! /usr/bin/node existiert nicht, wenn Node z.B. per nvm
+# installiert wurde (verbreitet, da Debian/RPi-Paketquellen oft veraltete
+# Node-Versionen liefern). Eigenen Pfad ermitteln: which node
 ExecStart=/usr/bin/node src/index.js
 Restart=always
 RestartSec=10

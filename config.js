@@ -43,6 +43,11 @@ module.exports = {
 
     // TCP-Verbindungs-Timeout zum Drucker in ms
     timeoutMs: 5000,
+
+    // Pfad zum Python-Interpreter. Standard: 'python3' (systemweite Installation).
+    // Für ein isoliertes virtuelles Environment (empfohlen, siehe README):
+    // pythonBin: '/home/pi/checkin-printer/venv/bin/python3',
+    pythonBin: 'python3',
   },
 
   // ── Field-Mapping ──────────────────────────────────────────────────────────
@@ -174,12 +179,17 @@ module.exports = {
   // ── Check-In Webhooks ──────────────────────────────────────────────────────
   // Werden nach jedem Druckauftrag gefeuert.
   // Alle aktiven Einträge werden parallel angesprochen.
+  //
+  // ⚠️  WICHTIG zu "secret": config.js wird üblicherweise mit ins Git-Repo
+  // eingecheckt (siehe README). Ein echtes Secret NIEMALS direkt als String
+  // eintragen — stattdessen per "env:VAR_NAME" auf eine Variable in der
+  // (nicht versionierten) .env verweisen. Beispiel unten.
   webhooks: [
     {
       name:    'Prod',
       url:     'https://meinserver.ch/checkin/webhook',
       method:  'POST',
-      secret:  'meinProdToken',
+      secret:  'env:WEBHOOK_SECRET_PROD', // Wert steht in .env, nicht hier
       retry:   3,
       retryMs: 2000,
       enabled: true,

@@ -46,6 +46,7 @@
 
 - Raspberry Pi / Debian, Node.js ≥ 18, Python 3
 - Brother QL Labeldrucker im Netzwerk (getestet: QL-720NWB, QL-820NWB)
+- **Weboberfläche des Druckers auf Englisch gestellt** — die automatische Fehlererkennung (Band leer, Deckel offen etc.) sucht nach englischen Textstrings im Drucker-Webstatus und funktioniert mit anderen Sprachen nicht zuverlässig
 - ChurchTools mit Check-In-Modul, Benutzer mit Rechten:
   - Check-in sehen
   - Drucker verwalten
@@ -64,6 +65,12 @@ npm install
 
 # 3. Python-Abhängigkeiten
 apt-get install -y python3-pip python3-pil fonts-dejavu
+
+# Falls schon mal das Original-Paket installiert wurde: zuerst entfernen,
+# sonst kann es mit brother_ql-inventree kollidieren (beide nutzen denselben
+# Modulnamen "brother_ql")
+pip3 uninstall -y brother_ql 2>/dev/null
+
 pip3 install -r requirements.txt --break-system-packages
 
 # 4. Konfiguration
@@ -72,7 +79,21 @@ nano .env        # CT_BASE_URL, CT_USERNAME, CT_PASSWORD eintragen
 nano config.js   # Drucker, Zeitfenster, Webhooks konfigurieren
 ```
 
-> **Hinweis:** Wir verwenden `brother_ql-inventree` statt dem originalen `brother_ql` für bessere QL-820NWB Unterstützung und natives `60x86` (DK-11234) Label.
+> **Hinweis:** Wir verwenden `brother_ql-inventree` statt dem originalen `brother_ql` für bessere QL-820NWB Unterstützung und natives `60x86` (DK-11234) Label. Beide Pakete stellen dasselbe Python-Modul (`brother_ql`) bereit — nicht parallel installieren.
+
+<details>
+<summary><b>Optional: Python-Abhängigkeiten in venv statt systemweit installieren</b></summary>
+
+```bash
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
+
+# In config.js unter "printer" eintragen:
+# pythonBin: '/home/pi/checkin-printer/venv/bin/python3',
+```
+
+Vermeidet, dass ungepinnte Pakete systemweit installiert werden und mit anderen Tools kollidieren könnten.
+</details>
 
 ---
 
@@ -105,12 +126,21 @@ LOG_LEVEL=info
 
 ### config.js
 
-Zentrale Konfigurationsdatei — kann sicher in Git eingecheckt werden.
+Zentrale Konfigurationsdatei — kann sicher in Git eingecheckt werden,
+**solange keine echten Secrets direkt darin stehen** (siehe Warnung bei
+`webhooks` unten).
 Alle Optionen sind inline kommentiert.
 
 **Zwei Drucker-Modi:**
 - **Einzel-Modus** — `printerHost` direkt, alle Etiketten auf einen Drucker
 - **Routing-Modus** — `labels{}`, jeder Etikettentyp auf eigenen Drucker/Layout
+
+> ⚠️ **Booleans strikt als `true`/`false` schreiben, nicht als String.**
+> `enabled: "false"` (mit Anführungszeichen) wird als *aktiviert* behandelt,
+> nicht deaktiviert — der Dienst validiert das beim Start und bricht mit
+> einer klaren Fehlermeldung ab, wenn irgendwo ein String statt eines
+> Booleans steht. Betroffene Felder: `checkEnabled`, `statusWebhook`,
+> `enabled` (Drucker/Routen/Webhooks), `retryOnPrintError`, `blockPrint`.
 
 ```javascript
 module.exports = {
@@ -127,6 +157,7 @@ module.exports = {
     labelType: '54',                    // Nur Einzel-Modus
     layoutFile: './label-layout.json',
     timeoutMs: 5000,
+    pythonBin: 'python3',                // z.B. Pfad zu venv-Python
   },
 
   fieldMapping: {
@@ -207,8 +238,10 @@ module.exports = {
   ],
 
   webhooks: [
+    // secret: 'env:WEBHOOK_SECRET_PROD' liest den echten Wert aus .env,
+    // damit kein Secret im (git-versionierten) config.js landet.
     { name: 'Prod', url: 'https://meinserver.ch/webhook', method: 'POST',
-      secret: 'token', retry: 3, retryMs: 2000, enabled: true },
+      secret: 'env:WEBHOOK_SECRET_PROD', retry: 3, retryMs: 2000, enabled: true },
   ],
 
   webhookOptions: {
@@ -293,6 +326,7 @@ Vor jeder Anmeldung wird der Drucker via TCP-Ping und Brother Web-API geprüft:
 | `printer.warning` | Warnung (nicht kritisch) |
 | `printer.ready` | Drucker wieder bereit nach Fehler |
 | `printer.job_expired` | Job aus Queue verworfen |
+| `printer.fatal` | `MAX_ERRORS` erreicht — dieser Drucker pausiert und meldet sich nach einer Cool-down-Zeit automatisch selbst wieder an (andere Drucker laufen unabhängig weiter) |
 
 #### Zeitfenster — activeTimes Format
 
@@ -392,8 +426,13 @@ DRY_RUN=true npm start       # Dry-Run (speichert label_preview_N_type.png)
 
 ## Systemdienst (Autostart)
 
+> **Wichtig:** `User`, `WorkingDirectory` und der Node-Pfad in `ExecStart`
+> müssen zum eigenen System passen — Standardwerte funktionieren oft nicht:
+> - Neuere Raspberry-Pi-OS-Images haben keinen "pi"-Nutzer mehr (eigenen ermitteln: `whoami`)
+> - `/usr/bin/node` existiert nicht bei nvm-Installationen (eigenen Pfad ermitteln: `which node`)
+
 ```bash
-nano checkin-printer.service   # User und WorkingDirectory prüfen
+nano checkin-printer.service   # User, WorkingDirectory und Node-Pfad prüfen (siehe Hinweis oben)
 
 sudo cp checkin-printer.service /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -432,7 +471,7 @@ Meldet den Drucker an, wartet auf einen Check-In und speichert den rohen Job-Pay
 | ⚡ Job empfangen | Polling alle `activeMs` (Standard: 5s) für `activeTtlMs` (Standard: 5min) |
 | 🕐 5min ohne Job | Zurück zu `idleMs` |
 | 🔕 Fenster schliesst | `hidePrinter` → Polling pausiert → Session-Renewal pausiert |
-| 🔴 MAX_ERRORS Fehler | Drucker abmelden → `process.exit(1)` → systemd startet neu |
+| 🔴 MAX_ERRORS Fehler | Nur dieser Drucker: abmelden → `printer.fatal`-Webhook → 60s Pause → automatischer Wiederanlauf. Andere Drucker laufen unbeeinträchtigt weiter (kein Neustart des ganzen Dienstes) |
 
 ---
 
@@ -529,6 +568,8 @@ LOG_LEVEL=debug npm start
 | `src/status-webhook-service.js` | Status-Webhooks |
 | `src/printers-config.js` | Drucker-Liste laden |
 | `src/logger.js` | Logging + Datei-Rotation |
+| `src/validate.js` | Strikte Boolean-Validierung für config.js |
+| `src/secrets.js` | Löst `env:VAR_NAME`-Secret-Referenzen auf |
 | `print_label.py` | Text → PNG → Brother Raster → TCP |
 | `diagnose.js` | Diagnose-Script |
 

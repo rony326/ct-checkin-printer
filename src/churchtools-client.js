@@ -7,6 +7,14 @@ const { logger } = require('./logger');
 const SESSION_TTL_MS   = 23 * 60 * 60 * 1000;
 const RENEWAL_RETRY_MS =  5 * 60 * 1000;
 
+// churchtoolsClient.ax ist eine PROZESSWEITE Singleton-Axios-Instanz aus dem
+// @churchtools/churchtools-client-Paket. _setupInterceptors() hängt sich
+// darin ein — bei mehr als einer ChurchToolsClient-Instanz im selben Prozess
+// würden sich Interceptoren (Cookie-Handling, 401-Retry) sonst lautlos
+// duplizieren. Aktuell wird im gesamten Code nur eine Instanz erzeugt; dieser
+// Guard macht die Einschränkung explizit, falls sich das mal ändert (#32).
+let _interceptorsAttached = false;
+
 class ChurchToolsClient {
   constructor(baseUrl, username, password) {
     this.baseUrl  = baseUrl.replace(/\/$/, '');
@@ -25,6 +33,15 @@ class ChurchToolsClient {
   // ── Interceptors ───────────────────────────────────────────────────────────
 
   _setupInterceptors() {
+    if (_interceptorsAttached) {
+      logger.warn(
+        'ChurchToolsClient: Interceptors bereits registriert — mehrere Instanzen im selben ' +
+        'Prozess werden nicht unterstützt (gemeinsame Axios-Singleton). Überspringe erneute Registrierung.'
+      );
+      return;
+    }
+    _interceptorsAttached = true;
+
     const jar  = this._cookieJar;
     const base = this.baseUrl;
     const ax   = churchtoolsClient.ax;

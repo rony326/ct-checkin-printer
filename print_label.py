@@ -79,6 +79,15 @@ def load_layout():
         ]},
     })
 
+# ── PII-Maskierung für Debug-Ausgaben ────────────────────────────────────────
+# Namen/Codes von Kindern/Eltern nicht im Klartext ins (potenziell tagelang
+# aufbewahrte) Debug-Log schreiben — nur erster Buchstabe + Länge (Issue #30).
+
+def mask_pii(value):
+    if not value:
+        return '?'
+    return value[0] + '*' * max(0, len(value) - 1)
+
 # ── Font-Cache ────────────────────────────────────────────────────────────────
 
 _font_cache = {}
@@ -416,8 +425,8 @@ def main():
             print('Job #{}: {} | name={} | code={} | qr={} | {}mm'.format(
                 i+1,
                 label_key,
-                parsed.get('name') or '?',
-                parsed.get('code') or '?',
+                mask_pii(parsed.get('name')),
+                mask_pii(parsed.get('code')),
                 qr_hash[:8] + '...' if qr_hash else 'kein',
                 layout_def.get('length_mm', 50),
             ), file=sys.stderr)

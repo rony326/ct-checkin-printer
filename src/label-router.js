@@ -43,6 +43,7 @@ class LabelRouter {
     this.labels      = config.LABEL_ROUTES || {};   // type → route config
     this.fieldMapping = config.FIELD_MAPPING || null;
     this.dryRun      = config.DRY_RUN === 'true' || false;
+    this.pythonBin   = config.PYTHON_BIN || 'python3';
     this.script      = path.resolve(__dirname, '..', 'print_label.py');
     this.mappingFile = path.resolve(__dirname, '..', config.MAPPING_FILE || 'field-mapping.json');
     this.layoutFile  = path.resolve(__dirname, '..', config.LAYOUT_FILE  || 'label-layout.json');
@@ -208,10 +209,10 @@ class LabelRouter {
 
     const printAs = job.parsed_fields?.type || 'unknown';
     logger.info(`Routing: Job ${job.id} (${printAs}) → ${route.printerHost}:${route.printerPort || 9100} (${route.labelType || '54'})`);
-    logger.debug('Python:', args.slice(1).join(' '));
+    logger.debug('Python:', this.pythonBin, args.slice(1).join(' '));
 
     return new Promise((resolve, reject) => {
-      const proc = spawn('python3', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+      const proc = spawn(this.pythonBin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
       let stderr = '';
 
       proc.stderr.on('data', d => {

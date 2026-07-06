@@ -98,9 +98,18 @@ async function main() {
 
   logger.info(`${printers.length} Drucker geladen`);
   printers.forEach(p => {
-    const schedule = p.activeTimesRaw !== null && p.activeTimesRaw !== undefined
-      ? `Zeitfenster: ${p.activeTimesRaw || 'immer aktiv (drucker-spezifisch)'}`
-      : config.ACTIVE_TIMES ? 'Zeitfenster: global' : 'Zeitfenster: immer aktiv';
+    // activeTimesRaw ist verlustbehaftet (sowohl "Feld fehlt" als auch
+    // "activeTimes: null" ergeben activeTimesRaw === null) — daher hier
+    // anhand des tatsächlich aufgelösten Zeitplans (p.activeTimes)
+    // unterscheiden, welcher Fall vorliegt (vgl. Issue #24).
+    let schedule;
+    if (p.activeTimes === null) {
+      schedule = 'Zeitfenster: immer aktiv';
+    } else if (p.activeTimes === config.ACTIVE_TIMES) {
+      schedule = 'Zeitfenster: global (geerbt)';
+    } else {
+      schedule = `Zeitfenster: ${p.activeTimesRaw} (drucker-spezifisch)`;
+    }
     const modus = p.isRoutingMode
       ? `Routing (${Object.keys(p.labelRoutes).join(', ')})`
       : `Einzel (${p.printerHost}:${p.printerPort})`;

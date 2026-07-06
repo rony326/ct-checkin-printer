@@ -3,6 +3,7 @@
 require('dotenv').config();
 const path = require('path');
 const { parseActiveTimes } = require('./schedule');
+const { requireBoolean }   = require('./validate');
 
 // ── .env (Secrets + Umgebung) ─────────────────────────────────────────────────
 
@@ -59,6 +60,9 @@ module.exports = {
   LABEL_TYPE:         cfg.printer?.labelType  || '54',
   LAYOUT_FILE:        cfg.printer?.layoutFile || './label-layout.json',
   PRINTER_TIMEOUT_MS: cfg.printer?.timeoutMs  ?? 5000,
+  // Pfad zum Python-Interpreter — z.B. für ein isoliertes venv statt
+  // systemweiter Installation (siehe README, Issue #29)
+  PYTHON_BIN:         cfg.printer?.pythonBin  || 'python3',
 
   // Field-Mapping (aus config.js)
   FIELD_MAPPING: cfg.fieldMapping || null,
@@ -72,7 +76,7 @@ module.exports = {
 
   // Check-In Webhooks (aus config.js)
   WEBHOOKS_RAW:        cfg.webhooks            || [],
-  WEBHOOK_BLOCK_PRINT: cfg.webhookOptions?.blockPrint ? 'true' : 'false',
+  WEBHOOK_BLOCK_PRINT: requireBoolean(cfg.webhookOptions?.blockPrint, 'webhookOptions.blockPrint', false) ? 'true' : 'false',
 
   // Status-Webhooks (aus config.js)
   STATUS_WEBHOOKS_RAW: cfg.statusWebhooks      || [],

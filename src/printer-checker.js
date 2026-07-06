@@ -141,6 +141,13 @@ function parseWebStatus(html) {
 
 // ── Haupt-Check ───────────────────────────────────────────────────────────────
 
+// Fehlererkennung (COVER OPEN, NO MEDIA etc.) basiert auf englischen Text-
+// Strings im Brother-Webstatus. Steht die Weboberfläche des Druckers auf
+// einer anderen Sprache, findet parseWebStatus() keines der erwarteten
+// Felder — dann einmalig pro Drucker warnen statt fälschlich "bereit" zu
+// meldet, ohne dass das je auffällt (siehe Issue #22).
+const _languageWarnedHosts = new Set();
+
 async function checkPrinter(host, port, timeoutMs = 5000) {
   const reachable = await tcpPing(host, port, timeoutMs);
   if (!reachable) return new PrinterStatus({ reachable: false });
@@ -148,6 +155,17 @@ async function checkPrinter(host, port, timeoutMs = 5000) {
   try {
     const html = await fetchWebStatus(host, timeoutMs);
     const { errors, warnings, info } = parseWebStatus(html);
+
+    if (Object.keys(info).length === 0 && !_languageWarnedHosts.has(host)) {
+      _languageWarnedHosts.add(host);
+      logger.warn(
+        `⚠️  Drucker-Status von ${host} konnte nicht ausgewertet werden. ` +
+        `Vermutlich ist die Web-Oberfläche des Druckers nicht auf Englisch gestellt — ` +
+        `die automatische Fehlererkennung (Band leer, Deckel offen etc.) funktioniert dann ` +
+        `nicht zuverlässig. Bitte Sprache im Drucker-Webinterface auf Englisch stellen.`
+      );
+    }
+
     logger.debug(`Web-Status ${host}: ${JSON.stringify(info)}`);
     return new PrinterStatus({ reachable: true, errors, warnings, raw: info });
   } catch (err) {

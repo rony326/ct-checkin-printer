@@ -25,6 +25,11 @@ class JobPoller {
     this._queue        = new PrintQueue(config);
     this._queueTimer   = null;
     this._printerReady = true; // Annahme: bereit beim Start
+
+    // Wird nach einer Fehler-Pause (siehe MAX_ERRORS) gesetzt: Drucker wurde
+    // zwischenzeitlich abgemeldet und muss vor dem nächsten Poll erneut
+    // angemeldet werden, auch wenn sich der Zeitfenster-Modus nicht geändert hat.
+    this._needsReactivation = false;
   }
 
   // ── Public ─────────────────────────────────────────────────────────────────
@@ -96,9 +101,20 @@ class JobPoller {
     if (mode !== this._lastMode) {
       await this._onModeChange(this._lastMode, mode);
       this._lastMode = mode;
+    } else if (this._needsReactivation && mode !== 'sleeping') {
+      // Wiederanlauf nach Fehler-Pause (siehe MAX_ERRORS unten): der
+      // Zeitfenster-Modus hat sich nicht geändert, der Drucker wurde aber
+      // zwischenzeitlich abgemeldet und muss erneut angemeldet werden.
+      this._needsReactivation = false;
+      try {
+        await this._activatePrinterWithCheck();
+      } catch (err) {
+        logger.error('Wiederanlauf fehlgeschlagen:', err.message);
+      }
     }
 
     if (mode === 'sleeping') {
+      this._needsReactivation = false; // wird beim nächsten Fenster-Öffnen ohnehin reaktiviert
       this._scheduleNext(this._sleepUntilNextWindow());
       return;
     }
@@ -133,14 +149,40 @@ class JobPoller {
       logger.error(`Poll-Fehler #${this._consecutiveErrors}: ${err.message}. Retry in ${backoff}ms`);
 
       if (this._consecutiveErrors >= this.config.MAX_ERRORS) {
-        logger.error(`🔴 ${this.config.MAX_ERRORS} Fehler hintereinander — melde Drucker ab und starte neu`);
+        const printerLabel = this.config.PRINTER_NAME || this.config.HOSTNAME;
+        const cooldownMs   = this.config.POLLER_RESTART_DELAY_MS || 60_000;
+
+        // Nur DIESEN Poller pausieren, nicht den ganzen Prozess beenden —
+        // sonst reisst ein einzelner instabiler Drucker bei Mehr-Drucker-Setups
+        // alle anderen (funktionierenden) Drucker mit runter (Issue #21).
+        logger.error(
+          `🔴 ${this.config.MAX_ERRORS} Fehler hintereinander für "${printerLabel}" — ` +
+          `melde Drucker ab und pausiere für ${cooldownMs / 1000}s (andere Drucker laufen unabhängig weiter)`
+        );
+
         try {
           await this.client.hidePrinter(this.config.HOSTNAME);
           logger.info(`Drucker abgemeldet: ${this.config.HOSTNAME}`);
         } catch (hideErr) {
           logger.error('Drucker-Abmeldung fehlgeschlagen:', hideErr.message);
         }
-        process.exit(1);
+
+        if (this.statusWebhook?.enabled) {
+          this.statusWebhook.send('printer.fatal', {
+            printerName: this.config.PRINTER_NAME,
+            hostname:    this.config.HOSTNAME,
+            printerHost: this.config.PRINTER_HOST,
+            printerPort: this.config.PRINTER_PORT,
+          }, {
+            reachable: false, ok: false, warnings: [], raw: null,
+            errors: [`${this.config.MAX_ERRORS} Fehler hintereinander: ${err.message}`],
+          });
+        }
+
+        this._consecutiveErrors  = 0;
+        this._needsReactivation  = true;
+        logger.info(`⏸️  Automatischer Wiederanlauf für "${printerLabel}" in ${cooldownMs / 1000}s...`);
+        this._scheduleNext(cooldownMs);
       } else {
         this._scheduleNext(backoff);
       }
@@ -346,6 +388,65 @@ class JobPoller {
     }
   }
 
+  // ── Drucker-Check + Anmeldung ──────────────────────────────────────────────
+
+  /**
+   * Prüft den/die Drucker (Einzel- oder Routing-Modus) und meldet danach bei
+   * ChurchTools an. Wird sowohl beim Öffnen eines Zeitfensters als auch beim
+   * automatischen Wiederanlauf nach einer Fehler-Pause (MAX_ERRORS) genutzt.
+   */
+  async _activatePrinterWithCheck(logPrefix = '🔔 melde Drucker an') {
+    const hostname     = this.config.HOSTNAME;
+    const printerName  = this.config.PRINTER_NAME || hostname;
+    const printerHost  = this.config.PRINTER_HOST;
+    const printerPort  = this.config.PRINTER_PORT || 9100;
+    const checkEnabled = this.config.PRINTER_CHECK_ENABLED !== false;
+    const isRouting    = this.config.IS_ROUTING_MODE || false;
+
+    if (!checkEnabled) {
+      logger.info(`⏭️  Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
+    } else if (isRouting && typeof this.printer.getUniqueHosts === 'function') {
+      const retryMs      = this.config.PRINTER_CHECK_RETRY_MS || 30000;
+      const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS     || 5000;
+      const hosts        = this.printer.getUniqueHosts();
+
+      logger.info(`🔍 Routing-Modus: prüfe ${hosts.length} Drucker für "${printerName}"...`);
+      await Promise.all(hosts.map(async ({ host, port }) => {
+        const status = await waitForPrinterReady(host, port, retryMs, tcpTimeoutMs);
+
+        if (status.warnings.length > 0) {
+          logger.warn(`⚠️  ${host}:${port} Warnung: ${status.warnings.join(', ')}`);
+          if (this.statusWebhook?.enabled) {
+            this.statusWebhook.send('printer.warning', { printerName, hostname, printerHost: host, printerPort: port }, status);
+          }
+        } else {
+          logger.info(`✅ ${host}:${port} bereit`);
+        }
+      }));
+    } else if (printerHost) {
+      const retryMs      = this.config.PRINTER_CHECK_RETRY_MS || 30000;
+      const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS     || 5000;
+
+      logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
+      const status = await waitForPrinterReady(printerHost, printerPort, retryMs, tcpTimeoutMs);
+
+      if (status.warnings.length > 0) {
+        logger.warn(`⚠️  Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
+        if (this.statusWebhook?.enabled) {
+          this.statusWebhook.send('printer.warning', { printerName, hostname, printerHost, printerPort }, status);
+        }
+      } else {
+        logger.info(`✅ Drucker "${printerName}" bereit`);
+        if (status.raw) logger.debug(`Web-Status: ${JSON.stringify(status.raw)}`);
+      }
+    }
+
+    logger.info(`${logPrefix}: "${printerName}"`);
+    const r = await this.client.activatePrinter(hostname, printerName);
+    if (r.success) logger.info(`✅ Drucker angemeldet: "${printerName}"`);
+    else           logger.error(`Drucker-Anmeldung fehlgeschlagen: ${r.message}`);
+  }
+
   // ── Zeitfenster-Wechsel ────────────────────────────────────────────────────
 
   async _onModeChange(prevMode, newMode) {
@@ -356,52 +457,7 @@ class JobPoller {
 
     if (prevMode === 'sleeping' && newMode !== 'sleeping') {
       await this.client.ensureLogin();
-
-      const checkEnabled = this.config.PRINTER_CHECK_ENABLED !== false;
-      const isRouting    = this.config.IS_ROUTING_MODE || false;
-
-      if (!checkEnabled) {
-        logger.info(`⏭️  Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
-      } else if (isRouting && typeof this.printer.getUniqueHosts === 'function') {
-        const retryMs      = this.config.PRINTER_CHECK_RETRY_MS || 30000;
-        const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS     || 5000;
-        const hosts        = this.printer.getUniqueHosts();
-
-        logger.info(`🔍 Routing-Modus: prüfe ${hosts.length} Drucker für "${printerName}"...`);
-        await Promise.all(hosts.map(async ({ host, port }) => {
-          const status = await waitForPrinterReady(host, port, retryMs, tcpTimeoutMs);
-
-          if (status.warnings.length > 0) {
-            logger.warn(`⚠️  ${host}:${port} Warnung: ${status.warnings.join(', ')}`);
-            if (this.statusWebhook?.enabled) {
-              this.statusWebhook.send('printer.warning', { printerName, hostname, printerHost: host, printerPort: port }, status);
-            }
-          } else {
-            logger.info(`✅ ${host}:${port} bereit`);
-          }
-        }));
-      } else if (printerHost) {
-        const retryMs      = this.config.PRINTER_CHECK_RETRY_MS || 30000;
-        const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS     || 5000;
-
-        logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
-        const status = await waitForPrinterReady(printerHost, printerPort, retryMs, tcpTimeoutMs);
-
-        if (status.warnings.length > 0) {
-          logger.warn(`⚠️  Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
-          if (this.statusWebhook?.enabled) {
-            this.statusWebhook.send('printer.warning', { printerName, hostname, printerHost, printerPort }, status);
-          }
-        } else {
-          logger.info(`✅ Drucker "${printerName}" bereit`);
-          if (status.raw) logger.debug(`Web-Status: ${JSON.stringify(status.raw)}`);
-        }
-      }
-
-      logger.info(`🔔 Zeitfenster geöffnet — melde Drucker an: "${printerName}"`);
-      const r = await this.client.activatePrinter(hostname, printerName);
-      if (r.success) logger.info(`✅ Drucker angemeldet: "${printerName}"`);
-      else           logger.error(`Drucker-Anmeldung fehlgeschlagen: ${r.message}`);
+      await this._activatePrinterWithCheck('🔔 Zeitfenster geöffnet — melde Drucker an');
     }
 
     if (prevMode !== 'sleeping' && prevMode !== null && newMode === 'sleeping') {

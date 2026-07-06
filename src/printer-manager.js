@@ -11,6 +11,7 @@ class PrinterManager {
     this.port         = port;
     this.labelType    = config.LABEL_TYPE    || '54';
     this.dryRun       = config.DRY_RUN === 'true' || false;
+    this.pythonBin    = config.PYTHON_BIN    || 'python3';
     this.script       = path.resolve(__dirname, '..', 'print_label.py');
     this.layoutFile   = path.resolve(__dirname, '..', config.LAYOUT_FILE  || 'label-layout.json');
     this.mappingFile  = path.resolve(__dirname, '..', config.MAPPING_FILE || 'field-mapping.json');
@@ -64,7 +65,9 @@ class PrinterManager {
 
     const enriched = this.enrichJobs(valid);
     enriched.forEach(j => {
-      if (j.qr_hash) logger.debug(`QR-Hash für ${j.parsed_fields.name || j.parsed_fields.id}: ${j.qr_hash}`);
+      // Job-ID statt Klarname im Log — vermeidet personenbezogene Daten
+      // (Namen von Kindern/Eltern) in Debug-Logfiles (Issue #30).
+      if (j.qr_hash) logger.debug(`QR-Hash für Job ${j.id}: ${j.qr_hash}`);
     });
 
     logger.info(`Drucke ${enriched.length} Etikett(en) → ${this.host}:${this.port}`);
@@ -110,9 +113,9 @@ class PrinterManager {
 
       if (this.dryRun) args.push('--dry-run');
 
-      logger.debug('Python:', args.slice(1).join(' '));
+      logger.debug('Python:', this.pythonBin, args.slice(1).join(' '));
 
-      const proc = spawn('python3', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+      const proc = spawn(this.pythonBin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
       let stderr = '';
 
       proc.stderr.on('data', d => {
@@ -133,7 +136,7 @@ class PrinterManager {
 
   async testConnection() {
     return new Promise(resolve => {
-      const proc = spawn('python3', [this.script, '--help'], { stdio: 'pipe' });
+      const proc = spawn(this.pythonBin, [this.script, '--help'], { stdio: 'pipe' });
       proc.on('close', code => resolve(code === 0));
       proc.on('error', () => resolve(false));
     });

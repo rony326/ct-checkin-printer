@@ -1,10 +1,12 @@
 'use strict';
 
-const https      = require('https');
-const http       = require('http');
-const fs         = require('fs');
-const path       = require('path');
-const { logger } = require('./logger');
+const https           = require('https');
+const http            = require('http');
+const fs              = require('fs');
+const path            = require('path');
+const { logger }      = require('./logger');
+const { resolveSecret } = require('./secrets');
+const { requireBoolean } = require('./validate');
 
 class WebhookService {
   constructor(config = {}) {
@@ -41,7 +43,11 @@ class WebhookService {
       return [];
     }
 
-    const active = list.filter(t => t.url && t.enabled !== false && !t._comment);
+    const withoutComments = list.filter(t => !t._comment);
+    const active = withoutComments.filter(t => {
+      const enabled = requireBoolean(t.enabled, `webhooks["${t.name || t.url}"].enabled`, true);
+      return t.url && enabled;
+    });
     if (active.length === 0) {
       logger.info('Webhook: keine aktiven Einträge');
       return [];
@@ -52,7 +58,7 @@ class WebhookService {
     return active.map(t => ({
       url:     t.url,
       method:  (t.method  || 'POST').toUpperCase(),
-      secret:  t.secret   || null,
+      secret:  resolveSecret(t.secret) || null,
       retry:   parseInt(t.retry   ?? this.defaultRetry,   10),
       retryMs: parseInt(t.retryMs ?? t.retry_ms ?? this.defaultRetryMs, 10),
       name:    t.name || t.url,
