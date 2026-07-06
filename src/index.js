@@ -13,7 +13,6 @@ const { loadPrinters }         = require('./printers-config');
 const { waitForPrinterReady }  = require('./printer-checker');
 const { isActiveNow }          = require('./schedule');
 const { logger }               = require('./logger');
-const config                   = require('./config');
 
 /**
  * Drucker-Check + Anmeldung bei CT.
@@ -83,6 +82,19 @@ async function checkAndActivatePrinter(client, statusWebhook, def, pollerConfig)
 
 async function main() {
   logger.info('ChurchTools Check-In Printer Service');
+
+  // Konfiguration laden (.env + config.js). Wirft z.B. bei fehlenden
+  // .env-Werten oder kaputtem config.js — hier statt als rohem Stacktrace
+  // sauber abfangen, das ist der allererste Schritt beim Erststart.
+  let config;
+  try {
+    config = require('./config');
+  } catch (err) {
+    logger.error('Konfigurationsfehler beim Start:', err.message);
+    logger.error('Bitte .env und config.js prüfen (siehe README, Abschnitt "Konfiguration").');
+    process.exit(1);
+  }
+
   logger.info(`Config    : ${config.CONFIG_FILE}`);
   logger.info(`Label-Typ : ${config.LABEL_TYPE}`);
   logger.info(`Dry-Run   : ${config.DRY_RUN}`);
@@ -127,8 +139,14 @@ async function main() {
   }
 
   // Webhooks
-  const webhook       = new WebhookService(config);
-  const statusWebhook = new StatusWebhookService(config);
+  let webhook, statusWebhook;
+  try {
+    webhook       = new WebhookService(config);
+    statusWebhook = new StatusWebhookService(config);
+  } catch (err) {
+    logger.error('Webhook-Konfiguration Fehler:', err.message);
+    process.exit(1);
+  }
 
   if (webhook.enabled)       logger.info(`Webhook: ${webhook.targets.length} Ziel(e) aktiv`);
   else                       logger.info('Webhook: deaktiviert');

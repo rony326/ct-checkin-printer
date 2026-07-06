@@ -6,6 +6,20 @@ Umfassende Sicherheits-, Zuverlässigkeits- und Installations-Härtung nach
 einem vollständigen Audit des Tools. Für jeden Punkt existiert ein GitHub-Issue
 (#19–#32).
 
+### ⚠️ Breaking Change — Config-Validierung
+
+Falls in eurer `config.js` irgendwo ein Boolean als String geschrieben ist
+(z.B. `enabled: "false"` statt `enabled: false`) oder `copies` einen
+ungültigen Wert hat, startet der Dienst ab dieser Version **nicht mehr** —
+vorher wurde das lautlos falsch interpretiert (String `"false"` galt als
+aktiviert!) bzw. führte zu 0 gedruckten Etiketten ohne jede Fehlermeldung.
+Vor dem Update `config.js` prüfen:
+```bash
+node -e "require('./src/printers-config').loadPrinters(require('./config.js').printers, '', require('./src/schedule').parseActiveTimes)"
+```
+Wirft der Befehl einen Fehler, zeigt er genau an, welches Feld korrigiert
+werden muss.
+
 ### 🧹 Versionierung
 
 - `package.json` stand seit mehreren Releases auf veralteter `1.1.0` (der

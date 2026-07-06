@@ -21,7 +21,6 @@ const { checkPrinter } = require('./printer-checker');
  *         printerHost: '192.168.1.50',
  *         printerPort: 9100,
  *         labelType:   '54',
- *         layoutFile:  './layout-parent.json',
  *         rotate:      '0',      // '0' | '90' | '180' | '270'
  *         enabled:     true,
  *         copies:      1,
@@ -30,13 +29,18 @@ const { checkPrinter } = require('./printer-checker');
  *         printerHost: '192.168.1.51',
  *         printerPort: 9100,
  *         labelType:   '60x86',
- *         layoutFile:  './layout-child.json',
  *         rotate:      '0',
  *         enabled:     true,
  *         copies:      1,
  *       },
  *     },
  *   }
+ *
+ * Layout kommt für alle Routen immer aus derselben globalen
+ * label-layout.json (config.printer.layoutFile) — der Etikettentyp
+ * (parent/child/leader etc.) wird darin als Key verwendet. Ein
+ * per-Route "layoutFile" wird NICHT unterstützt (wird beim Laden von
+ * config.js stillschweigend verworfen, siehe printers-config.js).
  */
 class LabelRouter {
   constructor(config = {}) {

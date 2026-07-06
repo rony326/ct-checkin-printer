@@ -4,7 +4,9 @@
  * config.js — Zentrale Konfiguration des ChurchTools Check-In Printer Service
  *
  * Secrets (CT_USERNAME, CT_PASSWORD, CT_BASE_URL) gehören in die .env, nicht hierher.
- * Diese Datei kann sicher in Git eingecheckt werden.
+ * Diese Datei kann sicher in Git eingecheckt werden — SOLANGE keine echten
+ * Secrets direkt darin stehen. Webhook-Secrets (siehe "webhooks"/"statusWebhooks"
+ * unten) als "env:VAR_NAME" referenzieren statt als Klartext-String einzutragen.
  */
 
 module.exports = {

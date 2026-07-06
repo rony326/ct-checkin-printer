@@ -93,6 +93,10 @@ python3 -m venv venv
 ```
 
 Vermeidet, dass ungepinnte Pakete systemweit installiert werden und mit anderen Tools kollidieren könnten.
+
+⚠️ Bei venv-Nutzung müssen auch alle manuellen `python3 ...`-Befehle in dieser
+Anleitung (z.B. im Troubleshooting-Abschnitt) durch `./venv/bin/python3 ...`
+ersetzt werden — sonst `ModuleNotFoundError`, da die Pakete nur im venv liegen.
 </details>
 
 ---
@@ -109,17 +113,21 @@ CT_BASE_URL=https://meinegemeinde.church.tools
 CT_USERNAME=drucker@meinegemeinde.de
 CT_PASSWORD=sicheresPasswort
 
+# Pfad zur Konfigurationsdatei (Standard: ./config.js)
+# CONFIG_FILE=./config.js
+
 # Log-Level: debug | info | warn | error (Standard: info)
 LOG_LEVEL=info
+
+# Logfiles aktivieren (Standard: true)
+# LOG_TO_FILE=true
 
 # Nur PNG rendern, nicht drucken (Standard: false)
 # DRY_RUN=true
 
-# Logfiles deaktivieren (Standard: true)
-# LOG_TO_FILE=true
-
-# Alternativer Pfad zur Konfigurationsdatei (Standard: ./config.js)
-# CONFIG_FILE=./config.js
+# Falls in config.js ein Webhook-Secret als "env:VAR_NAME" referenziert wird,
+# muss die Variable hier gesetzt werden, z.B.:
+# WEBHOOK_SECRET_PROD=meinEchterProdToken
 ```
 
 ---
@@ -431,6 +439,7 @@ Definiert Layout und Inhalt pro Etikettentyp. Der Key entspricht dem `type`-Feld
 
 ```bash
 npm start                    # normal
+npm run dev                  # Kurzform für: LOG_LEVEL=debug npm start
 LOG_LEVEL=debug npm start    # mit Debug-Logging
 DRY_RUN=true npm start       # Dry-Run (speichert label_preview_N_type.png)
 ```
@@ -471,6 +480,13 @@ node diagnose.js
 ```
 
 Meldet den Drucker an, wartet auf einen Check-In und speichert den rohen Job-Payload in `job-dump.json`.
+
+Standardmässig wird der Rechnername (`hostname`) und "Diagnose-Drucker" verwendet.
+Um gezielt einen bestimmten, in `config.js` konfigurierten Drucker zu testen
+(z.B. wenn der laut Troubleshooting "nicht in ChurchTools erscheint"):
+```bash
+HOSTNAME=B2 PRINTER_NAME=Minis node diagnose.js
+```
 
 ---
 
