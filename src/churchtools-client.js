@@ -113,7 +113,7 @@ class ChurchToolsClient {
     });
     if (result?.status === 'success' || result?.personId) {
       this._loggedIn = true;
-      logger.info(`✅ Login erfolgreich (personId: ${result.personId})`);
+      logger.info(`Login erfolgreich (personId: ${result.personId})`);
       return true;
     }
     throw new Error('Login-Antwort unerwartet: ' + JSON.stringify(result));
@@ -165,7 +165,7 @@ class ChurchToolsClient {
   }
 
   async _renew() {
-    logger.info('🔄 Session-Renewal (23h)...');
+    logger.info('Session-Renewal (23h)...');
     try {
       await this._doLogin();
       this._startRenewal();

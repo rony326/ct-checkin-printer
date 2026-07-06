@@ -134,7 +134,7 @@ class JobPoller {
         return;
       }
 
-      logger.info('📄 Druckauftrag empfangen');
+      logger.info('Druckauftrag empfangen');
 
       // Drucker-Status vor dem Druck prüfen
       await this._printWithQueueSupport(jobData);
@@ -156,7 +156,7 @@ class JobPoller {
         // sonst reisst ein einzelner instabiler Drucker bei Mehr-Drucker-Setups
         // alle anderen (funktionierenden) Drucker mit runter (Issue #21).
         logger.error(
-          `🔴 ${this.config.MAX_ERRORS} Fehler hintereinander für "${printerLabel}" — ` +
+          `${this.config.MAX_ERRORS} Fehler hintereinander für "${printerLabel}" — ` +
           `melde Drucker ab und pausiere für ${cooldownMs / 1000}s (andere Drucker laufen unabhängig weiter)`
         );
 
@@ -181,7 +181,7 @@ class JobPoller {
 
         this._consecutiveErrors  = 0;
         this._needsReactivation  = true;
-        logger.info(`⏸️  Automatischer Wiederanlauf für "${printerLabel}" in ${cooldownMs / 1000}s...`);
+        logger.info(`Automatischer Wiederanlauf für "${printerLabel}" in ${cooldownMs / 1000}s...`);
         this._scheduleNext(cooldownMs);
       } else {
         this._scheduleNext(backoff);
@@ -292,7 +292,7 @@ class JobPoller {
       || this.printer.queueConfig?.retryDelayMs
       || 30000;
 
-    logger.info(`🔁 Queue-Monitor gestartet (prüft alle ${retryDelayMs / 1000}s)`);
+    logger.info(`Queue-Monitor gestartet (prüft alle ${retryDelayMs / 1000}s)`);
     this._scheduleQueueCheck(retryDelayMs);
   }
 
@@ -354,7 +354,7 @@ class JobPoller {
     }
 
     // Drucker wieder bereit — Queue leeren
-    logger.info(`✅ Drucker wieder bereit — leere Queue (${this._queue.size} Job(s))`);
+    logger.info(`Drucker wieder bereit — leere Queue (${this._queue.size} Job(s))`);
     this._printerReady = true;
 
     // Status-Webhook "printer.ready"
@@ -395,7 +395,7 @@ class JobPoller {
    * ChurchTools an. Wird sowohl beim Öffnen eines Zeitfensters als auch beim
    * automatischen Wiederanlauf nach einer Fehler-Pause (MAX_ERRORS) genutzt.
    */
-  async _activatePrinterWithCheck(logPrefix = '🔔 melde Drucker an') {
+  async _activatePrinterWithCheck(logPrefix = 'melde Drucker an') {
     const hostname     = this.config.HOSTNAME;
     const printerName  = this.config.PRINTER_NAME || hostname;
     const printerHost  = this.config.PRINTER_HOST;
@@ -404,46 +404,46 @@ class JobPoller {
     const isRouting    = this.config.IS_ROUTING_MODE || false;
 
     if (!checkEnabled) {
-      logger.info(`⏭️  Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
+      logger.info(`Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
     } else if (isRouting && typeof this.printer.getUniqueHosts === 'function') {
       const retryMs      = this.config.PRINTER_CHECK_RETRY_MS || 30000;
       const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS     || 5000;
       const hosts        = this.printer.getUniqueHosts();
 
-      logger.info(`🔍 Routing-Modus: prüfe ${hosts.length} Drucker für "${printerName}"...`);
+      logger.info(`Routing-Modus: prüfe ${hosts.length} Drucker für "${printerName}"...`);
       await Promise.all(hosts.map(async ({ host, port }) => {
         const status = await waitForPrinterReady(host, port, retryMs, tcpTimeoutMs);
 
         if (status.warnings.length > 0) {
-          logger.warn(`⚠️  ${host}:${port} Warnung: ${status.warnings.join(', ')}`);
+          logger.warn(`${host}:${port} Warnung: ${status.warnings.join(', ')}`);
           if (this.statusWebhook?.enabled) {
             this.statusWebhook.send('printer.warning', { printerName, hostname, printerHost: host, printerPort: port }, status);
           }
         } else {
-          logger.info(`✅ ${host}:${port} bereit`);
+          logger.info(`${host}:${port} bereit`);
         }
       }));
     } else if (printerHost) {
       const retryMs      = this.config.PRINTER_CHECK_RETRY_MS || 30000;
       const tcpTimeoutMs = this.config.PRINTER_TIMEOUT_MS     || 5000;
 
-      logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
+      logger.info(`Prüfe Drucker ${printerHost}:${printerPort}...`);
       const status = await waitForPrinterReady(printerHost, printerPort, retryMs, tcpTimeoutMs);
 
       if (status.warnings.length > 0) {
-        logger.warn(`⚠️  Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
+        logger.warn(`Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
         if (this.statusWebhook?.enabled) {
           this.statusWebhook.send('printer.warning', { printerName, hostname, printerHost, printerPort }, status);
         }
       } else {
-        logger.info(`✅ Drucker "${printerName}" bereit`);
+        logger.info(`Drucker "${printerName}" bereit`);
         if (status.raw) logger.debug(`Web-Status: ${JSON.stringify(status.raw)}`);
       }
     }
 
     logger.info(`${logPrefix}: "${printerName}"`);
     const r = await this.client.activatePrinter(hostname, printerName);
-    if (r.success) logger.info(`✅ Drucker angemeldet: "${printerName}"`);
+    if (r.success) logger.info(`Drucker angemeldet: "${printerName}"`);
     else           logger.error(`Drucker-Anmeldung fehlgeschlagen: ${r.message}`);
   }
 
@@ -457,13 +457,13 @@ class JobPoller {
 
     if (prevMode === 'sleeping' && newMode !== 'sleeping') {
       await this.client.ensureLogin();
-      await this._activatePrinterWithCheck('🔔 Zeitfenster geöffnet — melde Drucker an');
+      await this._activatePrinterWithCheck('Zeitfenster geöffnet — melde Drucker an');
     }
 
     if (prevMode !== 'sleeping' && prevMode !== null && newMode === 'sleeping') {
-      logger.info(`🔕 Zeitfenster geschlossen — melde Drucker ab: "${printerName}"`);
+      logger.info(`Zeitfenster geschlossen — melde Drucker ab: "${printerName}"`);
       const r = await this.client.hidePrinter(hostname);
-      if (r.success) logger.info(`✅ Drucker abgemeldet: "${printerName}"`);
+      if (r.success) logger.info(`Drucker abgemeldet: "${printerName}"`);
       else           logger.error(`Drucker-Abmeldung fehlgeschlagen: ${r.message}`);
       this.client.onWindowClose();
     }
@@ -471,13 +471,13 @@ class JobPoller {
     if (newMode === 'sleeping') {
       const ms   = msUntilNextWindow(this.config.ACTIVE_TIMES);
       const info = (ms && ms !== Infinity) ? ` — nächstes Fenster in ${Math.round(ms / 60000)}min` : '';
-      logger.info(`💤 Ausserhalb Zeitfenster${info}`);
+      logger.info(`Ausserhalb Zeitfenster${info}`);
     } else if (prevMode === 'sleeping') {
-      logger.info(`🕐 Idle-Polling gestartet (${this.config.POLL_IDLE_MS}ms)`);
+      logger.info(`Idle-Polling gestartet (${this.config.POLL_IDLE_MS}ms)`);
     } else if (newMode === 'active' && prevMode === 'idle') {
-      logger.info(`⚡ Aktives Polling (${this.config.POLL_ACTIVE_MS}ms)`);
+      logger.info(`Aktives Polling (${this.config.POLL_ACTIVE_MS}ms)`);
     } else if (newMode === 'idle' && prevMode === 'active') {
-      logger.info(`🕐 Zurück zu Idle-Polling (${this.config.POLL_IDLE_MS}ms)`);
+      logger.info(`Zurück zu Idle-Polling (${this.config.POLL_IDLE_MS}ms)`);
     }
   }
 

@@ -159,7 +159,7 @@ async function checkPrinter(host, port, timeoutMs = 5000) {
     if (Object.keys(info).length === 0 && !_languageWarnedHosts.has(host)) {
       _languageWarnedHosts.add(host);
       logger.warn(
-        `⚠️  Drucker-Status von ${host} konnte nicht ausgewertet werden. ` +
+        `Drucker-Status von ${host} konnte nicht ausgewertet werden. ` +
         `Vermutlich ist die Web-Oberfläche des Druckers nicht auf Englisch gestellt — ` +
         `die automatische Fehlererkennung (Band leer, Deckel offen etc.) funktioniert dann ` +
         `nicht zuverlässig. Bitte Sprache im Drucker-Webinterface auf Englisch stellen.`
@@ -182,7 +182,7 @@ async function waitForPrinter(host, port, retryIntervalMs = 30000, timeoutMs = 5
     attempt++;
     const status = await checkPrinter(host, port, timeoutMs);
     if (status.reachable) {
-      if (attempt > 1) logger.info(`✅ Drucker ${host}:${port} wieder erreichbar (nach ${attempt} Versuchen)`);
+      if (attempt > 1) logger.info(`Drucker ${host}:${port} wieder erreichbar (nach ${attempt} Versuchen)`);
       return status;
     }
     logger.warn(`Drucker ${host}:${port} nicht erreichbar (Versuch ${attempt}) — retry in ${retryIntervalMs / 1000}s`);
@@ -203,7 +203,7 @@ async function waitForPrinterReady(host, port, retryIntervalMs = 30000, timeoutM
     } else if (status.errors.length > 0) {
       logger.warn(`Drucker ${host}:${port} nicht bereit: ${status.errors.join(', ')} (Versuch ${attempt}) — retry in ${retryIntervalMs / 1000}s`);
     } else {
-      if (attempt > 1) logger.info(`✅ Drucker ${host}:${port} wieder bereit (nach ${attempt} Versuchen)`);
+      if (attempt > 1) logger.info(`Drucker ${host}:${port} wieder bereit (nach ${attempt} Versuchen)`);
       return status;
     }
 

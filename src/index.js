@@ -26,12 +26,12 @@ async function checkAndActivatePrinter(client, statusWebhook, def, pollerConfig)
   const tcpTimeoutMs = pollerConfig.PRINTER_TIMEOUT_MS || 5000;
 
   if (!checkEnabled) {
-    logger.info(`⏭️  Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
+    logger.info(`Drucker-Check deaktiviert für "${printerName}" — melde direkt an`);
   } else if (isRoutingMode) {
     // Routing-Modus: alle physischen Drucker prüfen
     const router = new LabelRouter(pollerConfig);
     const hosts  = router.getUniqueHosts();
-    logger.info(`🔍 Routing-Modus: prüfe ${hosts.length} Drucker für "${printerName}"...`);
+    logger.info(`Routing-Modus: prüfe ${hosts.length} Drucker für "${printerName}"...`);
 
     // Alle parallel prüfen und warten
     await Promise.all(hosts.map(async ({ host, port }) => {
@@ -42,14 +42,14 @@ async function checkAndActivatePrinter(client, statusWebhook, def, pollerConfig)
         const status = await wfr(host, port, checkRetryIntervalMs, tcpTimeoutMs);
 
         if (status.ok) {
-          if (attempt > 1) logger.info(`✅ Drucker ${host}:${port} bereit`);
+          if (attempt > 1) logger.info(`Drucker ${host}:${port} bereit`);
           if (status.warnings.length > 0) {
-            logger.warn(`⚠️  ${host}:${port} Warnung: ${status.warnings.join(', ')}`);
+            logger.warn(`${host}:${port} Warnung: ${status.warnings.join(', ')}`);
             if (statusWebhook?.enabled) {
               statusWebhook.send('printer.warning', { printerName, hostname, printerHost: host, printerPort: port }, status);
             }
           } else {
-            logger.info(`✅ ${host}:${port} bereit`);
+            logger.info(`${host}:${port} bereit`);
           }
           break;
         }
@@ -59,30 +59,30 @@ async function checkAndActivatePrinter(client, statusWebhook, def, pollerConfig)
   } else {
     // Einzel-Modus: einen Drucker prüfen
     const { printerHost, printerPort } = def;
-    logger.info(`🔍 Prüfe Drucker ${printerHost}:${printerPort}...`);
+    logger.info(`Prüfe Drucker ${printerHost}:${printerPort}...`);
     const status = await waitForPrinterReady(printerHost, printerPort, checkRetryIntervalMs, tcpTimeoutMs);
 
     if (status.warnings.length > 0) {
-      logger.warn(`⚠️  Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
+      logger.warn(`Drucker "${printerName}" Warnung: ${status.warnings.join(', ')}`);
       if (statusWebhook?.enabled) {
         statusWebhook.send('printer.warning', { printerName, hostname, printerHost: def.printerHost, printerPort: def.printerPort }, status);
       }
     } else {
-      logger.info(`✅ Drucker "${printerName}" bereit`);
+      logger.info(`Drucker "${printerName}" bereit`);
     }
   }
 
   // Drucker anmelden
   const r = await client.activatePrinter(hostname, printerName);
   if (r.success) {
-    logger.info(`✅ "${printerName} (${hostname})" angemeldet`);
+    logger.info(`"${printerName} (${hostname})" angemeldet`);
   } else {
     logger.error(`activatePrinter "${hostname}": ${r.message}`);
   }
 }
 
 async function main() {
-  logger.info('🖨️  ChurchTools Check-In Printer Service');
+  logger.info('ChurchTools Check-In Printer Service');
   logger.info(`Config    : ${config.CONFIG_FILE}`);
   logger.info(`Label-Typ : ${config.LABEL_TYPE}`);
   logger.info(`Dry-Run   : ${config.DRY_RUN}`);
@@ -183,12 +183,12 @@ async function main() {
       await client.ensureLogin();
       await checkAndActivatePrinter(client, statusWebhook, def, poller.config);
     } else {
-      logger.info(`💤 "${def.printerName} (${def.hostname})" — ausserhalb Zeitfenster`);
+      logger.info(`"${def.printerName} (${def.hostname})" — ausserhalb Zeitfenster`);
     }
     await poller.start();
   }));
 
-  logger.info('🔄 Alle Poller laufen');
+  logger.info('Alle Poller laufen');
 }
 
 main().catch(err => {

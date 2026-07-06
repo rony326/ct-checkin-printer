@@ -100,7 +100,7 @@ class StatusWebhookService {
       try {
         const statusCode = await this._post(target, body);
         if (statusCode >= 200 && statusCode < 300) {
-          logger.info(`✅ Status-Webhook "${target.name}" gesendet (HTTP ${statusCode})`);
+          logger.info(`Status-Webhook "${target.name}" gesendet (HTTP ${statusCode})`);
           return;
         }
         lastError = new Error(`HTTP ${statusCode}`);

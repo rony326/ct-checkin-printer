@@ -2,6 +2,13 @@
 
 ## [Unreleased] — 2026-07-06
 
+### 🎨 Logging
+
+- **Emojis aus allen Log-Ausgaben entfernt** — stattdessen werden Log-Zeilen
+  auf der Konsole nach Level eingefärbt (grau=debug, cyan=info, gelb=warn,
+  rot=error). Funktioniert nur wenn die Ausgabe an ein TTY geht und respektiert
+  die `NO_COLOR`-Konvention; Logdateien bleiben unfarbig (reiner Text).
+
 Umfassende Sicherheits-, Zuverlässigkeits- und Installations-Härtung nach
 einem vollständigen Audit des Tools. Für jeden Punkt existiert ein GitHub-Issue
 (#19–#32).

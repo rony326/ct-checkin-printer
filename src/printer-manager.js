@@ -76,7 +76,7 @@ class PrinterManager {
 
     try {
       await this._runPython(JSON.stringify(enriched));
-      logger.info(`✅ ${enriched.length} Etikett(en) gedruckt`);
+      logger.info(`${enriched.length} Etikett(en) gedruckt`);
     } catch (err) {
       // Druckfehler — alle Jobs als fehlgeschlagen markieren
       logger.error(`Druckfehler: ${err.message}`);

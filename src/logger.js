@@ -77,12 +77,38 @@ function cleanOldLogs(dir) {
       if (dateStr < cutoffStr) {
         fs.unlinkSync(path.join(dir, file));
         // Direkt in stdout schreiben um Rekursion zu vermeiden
-        process.stdout.write(`[${new Date().toISOString()}] [INFO ] Log gelöscht: ${file}\n`);
+        const line = `[${new Date().toISOString()}] [INFO ] Log gelöscht: ${file}`;
+        process.stdout.write(colorize('info', line, process.stdout) + '\n');
       }
     }
   } catch (err) {
-    process.stderr.write(`[${new Date().toISOString()}] [WARN ] Log-Cleanup Fehler: ${err.message}\n`);
+    const line = `[${new Date().toISOString()}] [WARN ] Log-Cleanup Fehler: ${err.message}`;
+    process.stderr.write(colorize('warn', line, process.stderr) + '\n');
   }
+}
+
+// ── Farbe (nur Konsole, TTY) ───────────────────────────────────────────────────
+// Ersetzt die früher pro Meldung genutzten Emojis: die Zeile wird stattdessen
+// je nach Level eingefärbt (grau/cyan/gelb/rot). Respektiert die NO_COLOR-
+// Konvention (https://no-color.org) und schreibt Logfiles immer unfarbig,
+// da rohe ANSI-Codes in Textdateien/Log-Viewern nur stören würden.
+
+const ANSI = {
+  debug: '\x1b[90m', // grau
+  info:  '\x1b[36m', // cyan
+  warn:  '\x1b[33m', // gelb
+  error: '\x1b[31m', // rot
+};
+const ANSI_RESET = '\x1b[0m';
+
+function supportsColor(stream) {
+  return !!stream.isTTY && !process.env.NO_COLOR && process.env.TERM !== 'dumb';
+}
+
+function colorize(level, text, stream) {
+  if (!supportsColor(stream)) return text;
+  const color = ANSI[level];
+  return color ? `${color}${text}${ANSI_RESET}` : text;
 }
 
 // ── Logging ───────────────────────────────────────────────────────────────────
@@ -98,21 +124,24 @@ function log(level, ...args) {
   const message = args.map(a =>
     typeof a === 'object' ? JSON.stringify(a) : String(a)
   ).join(' ');
-  const line = `${prefix} ${message}`;
+  const line = `${prefix} ${message}`; // unfarbig — wird für die Logdatei verwendet
 
-  // Konsole
+  // Konsole (eingefärbt, falls TTY)
+  const consoleStream = (level === 'error' || level === 'warn') ? process.stderr : process.stdout;
+  const consoleLine   = colorize(level, line, consoleStream);
+
   if (level === 'error') {
-    console.error(line);
+    console.error(consoleLine);
   } else if (level === 'warn') {
-    console.warn(line);
+    console.warn(consoleLine);
   } else {
-    console.log(line);
+    console.log(consoleLine);
   }
 
   // Datei
   try {
-    const stream = getLogStream();
-    if (stream) stream.write(line + '\n');
+    const fileStream = getLogStream();
+    if (fileStream) fileStream.write(line + '\n');
   } catch (err) {
     process.stderr.write(`Log-Write Fehler: ${err.message}\n`);
   }
