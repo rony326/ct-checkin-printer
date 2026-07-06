@@ -17,7 +17,7 @@ const { requireBoolean } = require('./validate');
  *       name:    'Alert',
  *       url:     'https://meinserver.ch/printer/alert',
  *       method:  'POST',       // POST oder PUT
- *       secret:  'token',      // Bearer-Token (optional)
+ *       secret:  'env:STATUS_WEBHOOK_SECRET', // Bearer-Token, aus .env (optional)
  *       retry:   3,            // Anzahl Versuche
  *       retryMs: 2000,         // Wartezeit zwischen Versuchen
  *       enabled: true,
@@ -25,9 +25,11 @@ const { requireBoolean } = require('./validate');
  *   ]
  *
  * Events:
- *   printer.error   — kritischer Fehler (Deckel offen, Band leer etc.)
- *   printer.warning — Warnung
- *   printer.ready   — Drucker wieder bereit (nach Fehler)
+ *   printer.error        — kritischer Fehler (Deckel offen, Band leer etc.)
+ *   printer.warning      — Warnung
+ *   printer.ready        — Drucker wieder bereit (nach Fehler)
+ *   printer.job_expired  — Job aus Retry-Queue verworfen (maxRetries/maxAgeMs erreicht)
+ *   printer.fatal        — MAX_ERRORS erreicht, Poller pausiert und erholt sich automatisch
  */
 class StatusWebhookService {
   constructor(config = {}) {

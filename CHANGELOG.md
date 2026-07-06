@@ -1,17 +1,20 @@
 # Changelog
 
-## [Unreleased] — 2026-07-06
-
-### 🎨 Logging
-
-- **Emojis aus allen Log-Ausgaben entfernt** — stattdessen werden Log-Zeilen
-  auf der Konsole nach Level eingefärbt (grau=debug, cyan=info, gelb=warn,
-  rot=error). Funktioniert nur wenn die Ausgabe an ein TTY geht und respektiert
-  die `NO_COLOR`-Konvention; Logdateien bleiben unfarbig (reiner Text).
+## [1.3.0-beta.2] — 2026-07-06
 
 Umfassende Sicherheits-, Zuverlässigkeits- und Installations-Härtung nach
 einem vollständigen Audit des Tools. Für jeden Punkt existiert ein GitHub-Issue
 (#19–#32).
+
+### 🧹 Versionierung
+
+- `package.json` stand seit mehreren Releases auf veralteter `1.1.0` (der
+  Tag `1.3.0-beta.1` für Label-Routing/static-Blocks/Rotation wurde nie in
+  `package.json` nachgezogen) — jetzt auf `1.3.0-beta.2` aktualisiert.
+- `package-lock.json` zeigte noch Name/Version des ursprünglichen Projekt-
+  Arbeitstitels (`checkin-printer` `1.0.0`) — an `package.json` angeglichen.
+- CHANGELOG um den bisher undokumentierten `1.3.0-beta.1`-Release ergänzt
+  (siehe unten) und Versions-Überschriften einheitlich formatiert.
 
 ### 🔒 Sicherheit
 
@@ -72,7 +75,40 @@ einem vollständigen Audit des Tools. Für jeden Punkt existiert ein GitHub-Issu
   klaren Fehlermeldung ab, statt dass zu altes Node.js erst beim Start mit
   einem kryptischen `SyntaxError` scheitert (#31).
 
-## v1.2.0 — 2026-05-13
+### 🎨 Logging
+
+- **Emojis aus allen Log-Ausgaben entfernt** — stattdessen werden Log-Zeilen
+  auf der Konsole nach Level eingefärbt (grau=debug, cyan=info, gelb=warn,
+  rot=error). Funktioniert nur wenn die Ausgabe an ein TTY geht und respektiert
+  die `NO_COLOR`-Konvention; Logdateien bleiben unfarbig (reiner Text).
+
+## [1.3.0-beta.1] — 2026-05-17
+
+### ✨ Neu
+
+- **Label-Routing** (#7, #8, #9, #10) — Etiketten anhand des `type`-Felds auf
+  unterschiedliche physische Drucker mit eigenem Layout routen
+  (`printers[].labels{}` statt `printerHost` direkt)
+  - `labels.<type>.enabled: false` — einzelnes Etikett deaktivieren (#7)
+  - `labels.<type>.copies: N` — mehrfach drucken (#9)
+  - Beliebig viele Etikettentypen — einfach weiterer Key in `labels{}` (#10)
+  - `also: ['leader']` — zusätzliches Etikett mit denselben Job-Daten aber
+    eigenem Layout drucken, wenn ChurchTools nur ein Template erlaubt (#8)
+  - Beim Start müssen alle physischen Drucker eines Standorts bereit sein,
+    bevor angemeldet wird; gleicher Drucker druckt sequenziell, verschiedene
+    Drucker parallel
+- **Static Block-Typ** (#12) — `"type": "static"` in `label-layout.json` für
+  fixen Freitext unabhängig von CT-Felddaten (z.B. "Leiter"-Beschriftung)
+- **Inhalts-Rotation für Die-Cut-Labels** — `rotate: '90'/'180'/'270'` dreht
+  jetzt den Etiketten-*Inhalt* statt der Bild-Dimensionen, dadurch keine
+  Grössen-/Positionsfehler mehr bei selbstklebenden Die-Cut-Labels (DK-11234)
+
+### 📦 Python-Abhängigkeiten
+
+- `requirements.txt` eingeführt (`brother_ql-inventree`, `Pillow`, `qrcode`)
+  statt manueller `pip3 install`-Anleitung in der README
+
+## [1.2.0] — 2026-05-13
 
 ### 🚀 Highlights
 - Vollständiges Drucker-Status-Monitoring mit Brother Web-API
@@ -201,7 +237,7 @@ PRINTER_CHECK_RETRY_MS: p.checkRetryIntervalMs,
 STATUS_WEBHOOK_ENABLED: p.statusWebhook,
 ```
 
-## v1.2.0-beta.1 — Config Refactor & Session Management
+## [1.2.0-beta.1] — 2026-04-19 — Config Refactor & Session Management
 
 ### ⚠️ Breaking Changes
 - `printers.json`, `webhooks.json` und `field-mapping.json` wurden in `config.js` zusammengeführt und können gelöscht werden

@@ -162,7 +162,7 @@ module.exports = {
 
   fieldMapping: {
     separator: '=',
-    fields: { name: 'name', id: 'id', code: 'code', group: 'group', type: 'type' },
+    fields: { name: 'name', id: 'id', code: 'code', group: 'group', type: 'type', extra: 'extra' },
     parentValue: 'parent',
     childValue: 'child',
   },
@@ -330,13 +330,26 @@ Vor jeder Anmeldung wird der Drucker via TCP-Ping und Brother Web-API geprüft:
 
 #### Zeitfenster — activeTimes Format
 
+**Global** (`polling.activeTimes`):
 ```javascript
 activeTimes: 'So:09:00-12:00'
 activeTimes: 'So:09:00-12:00 18:00-20:00'
 activeTimes: 'Mo-Fr:08:00-17:00,So:09:00-12:00'
-activeTimes: ''           // immer aktiv
-// activeTimes: null      // immer aktiv (ignoriert globales)
+activeTimes: ''   // kein Zeitfenster gesetzt — immer aktiv
 ```
+
+**Pro Drucker** (`printers[].activeTimes`, überschreibt global):
+```javascript
+activeTimes: 'So:09:00-12:00'  // eigenes Zeitfenster für diesen Drucker
+activeTimes: ''                 // erbt das globale Zeitfenster (Feld weglassen: gleicher Effekt)
+activeTimes: null                // immer aktiv — ignoriert das globale Zeitfenster komplett
+```
+
+> ⚠️ `''` und `null` sehen ähnlich aus, bedeuten pro Drucker aber Gegenteiliges:
+> `''` **erbt** das globale Zeitfenster, `null` **ignoriert** es und läuft immer.
+> Beim Start zeigt der Dienst pro Drucker eindeutig an, welcher Fall zutrifft
+> (`Zeitfenster: global (geerbt)` vs. `Zeitfenster: immer aktiv`) — im Zweifel
+> dort nachsehen.
 
 #### Check-In Webhook-Payload
 

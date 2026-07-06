@@ -216,10 +216,11 @@ module.exports = {
   // Separater Webhook nur für Drucker-Status-Events.
   //
   // Events:
-  //   printer.error   — kritischer Fehler (Deckel offen, Band leer etc.)
-  //   printer.warning — Warnung
-  //   printer.ready   — Drucker wieder bereit nach Fehler
+  //   printer.error       — kritischer Fehler (Deckel offen, Band leer etc.)
+  //   printer.warning     — Warnung
+  //   printer.ready       — Drucker wieder bereit nach Fehler
   //   printer.job_expired — Job aus Queue verworfen
+  //   printer.fatal       — MAX_ERRORS erreicht, Drucker pausiert + Auto-Recovery
   statusWebhooks: [
     {
       name:    'Alert',
