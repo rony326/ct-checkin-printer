@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Config-Generator — ct-checkin-printer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="page-header">
+  <h1>ct-checkin-printer — Config-Generator</h1>
+  <p>
+    Erzeugt <code>config.js</code> und <code>.env</code> für den
+    <a href="https://github.com/rony326/ct-checkin-printer" target="_blank" rel="noopener">ChurchTools Check-In Label Printer</a>
+    per Formular. Alles läuft lokal im Browser — es wird nichts an einen Server gesendet.
+  </p>
+  <p class="hint">
+    <code>label-layout.json</code> wird hier (noch) nicht generiert — dafür weiterhin die
+    <a href="https://github.com/rony326/ct-checkin-printer#label-layoutjson" target="_blank" rel="noopener">README-Doku</a> verwenden.
+  </p>
+</header>
+
+<main class="layout">
+
+<form id="form" class="form-panel">
+
+  <!-- ── .env ─────────────────────────────────────────────────────────── -->
+  <fieldset>
+    <legend>ChurchTools-Zugangsdaten &amp; Umgebung <span class="badge">.env</span></legend>
+
+    <label>CT_BASE_URL
+      <input type="text" id="ctBaseUrl" placeholder="https://meinegemeinde.church.tools" required>
+    </label>
+    <label>CT_USERNAME
+      <input type="text" id="ctUsername" placeholder="drucker@meinegemeinde.de" required>
+    </label>
+    <label>CT_PASSWORD
+      <input type="text" id="ctPassword" placeholder="sicheresPasswort" required>
+    </label>
+
+    <div class="row">
+      <label>LOG_LEVEL
+        <select id="logLevel">
+          <option value="info" selected>info</option>
+          <option value="debug">debug</option>
+          <option value="warn">warn</option>
+          <option value="error">error</option>
+        </select>
+      </label>
+      <label class="checkbox"><input type="checkbox" id="logToFile" checked> LOG_TO_FILE</label>
+      <label class="checkbox"><input type="checkbox" id="dryRun"> DRY_RUN</label>
+    </div>
+  </fieldset>
+
+  <!-- ── Polling ──────────────────────────────────────────────────────── -->
+  <fieldset>
+    <legend>Polling <span class="badge">config.js</span></legend>
+
+    <div class="row">
+      <label>Ruhemodus-Intervall (ms)
+        <input type="number" id="idleMs" value="15000" min="1000" step="1000" data-unit="ms">
+        <span class="hint" data-hint-for="idleMs"></span>
+      </label>
+      <label>Aktiv-Intervall (ms)
+        <input type="number" id="activeMs" value="5000" min="500" step="500" data-unit="ms">
+        <span class="hint" data-hint-for="activeMs"></span>
+      </label>
+      <label>Aktiv-Dauer nach Job (ms)
+        <input type="number" id="activeTtlMs" value="300000" min="1000" step="1000" data-unit="ms">
+        <span class="hint" data-hint-for="activeTtlMs"></span>
+      </label>
+    </div>
+
+    <label>Globales Zeitfenster (activeTimes)
+      <input type="text" id="pollingActiveTimes" placeholder="So:09:00-13:00 (leer = immer aktiv)" value="So:09:00-13:00">
+    </label>
+    <p class="hint">
+      Format: <code>Mo-Fr:08:00-17:00,So:09:00-12:00</code>. Tagkürzel: Mo Di Mi Do Fr Sa So (auch englisch: Mo Tu We Th Fr Sa Su). Leer = kein Zeitfenster, Drucker sind immer aktiv.
+    </p>
+
+    <label>Max. aufeinanderfolgende Fehler bis Neustart
+      <input type="number" id="maxErrors" value="10" min="1" step="1">
+    </label>
+  </fieldset>
+
+  <!-- ── Logging ──────────────────────────────────────────────────────── -->
+  <fieldset>
+    <legend>Logging <span class="badge">config.js</span></legend>
+    <div class="row">
+      <label>Log-Verzeichnis
+        <input type="text" id="logDir" value="./logs">
+      </label>
+      <label>Aufbewahrung (Tage, 0 = unbegrenzt)
+        <input type="number" id="retentionDays" value="14" min="0" step="1">
+      </label>
+    </div>
+  </fieldset>
+
+  <!-- ── Drucker-Grundeinstellungen (Einzel-Modus) ───────────────────── -->
+  <fieldset>
+    <legend>Drucker-Grundeinstellungen <span class="badge">config.js</span></legend>
+    <p class="hint">
+      Diese Werte gelten global — <code>labelType</code> nur im Einzel-Modus (siehe unten),
+      <code>layoutFile</code>/<code>timeoutMs</code>/<code>pythonBin</code> für beide Modi.
+    </p>
+    <div class="row">
+      <label>labelType (Einzel-Modus)
+        <select id="printerLabelType">
+          <option value="54" selected>54 — 54mm Endlosband</option>
+          <option value="62">62 — 62mm Endlosband</option>
+          <option value="60x86">60x86 — DK-11234 (selbstklebend)</option>
+          <option value="29x90">29x90 — DK-11201</option>
+          <option value="102x51">102x51 — DK-11241</option>
+          <option value="custom">Andere / manuell eintragen…</option>
+        </select>
+      </label>
+      <label id="printerLabelTypeCustomWrap" class="hidden">Eigener labelType-Identifier
+        <input type="text" id="printerLabelTypeCustom" placeholder="z.B. d12">
+      </label>
+    </div>
+    <p class="hint">
+      Alle verfügbaren Typen: <code>python3 -c "from brother_ql.labels import ALL_LABELS; [print(l.identifier, l.name) for l in ALL_LABELS]"</code>
+    </p>
+    <div class="row">
+      <label>layoutFile
+        <input type="text" id="layoutFile" value="./label-layout.json">
+      </label>
+      <label>Drucker-Timeout (ms)
+        <input type="number" id="printerTimeoutMs" value="5000" min="500" step="500">
+      </label>
+      <label>Python-Interpreter
+        <input type="text" id="pythonBin" value="python3">
+      </label>
+    </div>
+  </fieldset>
+
+  <!-- ── Drucker-Liste ────────────────────────────────────────────────── -->
+  <fieldset>
+    <legend>Drucker <span class="badge">config.js</span></legend>
+    <div id="printers"></div>
+    <button type="button" id="addPrinter" class="btn-add">+ Drucker hinzufügen</button>
+  </fieldset>
+
+  <!-- ── Field-Mapping (advanced) ─────────────────────────────────────── -->
+  <details class="advanced">
+    <summary>Field-Mapping (Erweitert — Standardwerte passen meist)</summary>
+    <fieldset>
+      <legend>Field-Mapping <span class="badge">config.js</span></legend>
+      <label>Trennzeichen
+        <input type="text" id="fmSeparator" value="=" maxlength="1">
+      </label>
+      <div class="row wrap">
+        <label>Feld "name"<input type="text" id="fmName" value="name"></label>
+        <label>Feld "id"<input type="text" id="fmId" value="id"></label>
+        <label>Feld "code"<input type="text" id="fmCode" value="code"></label>
+        <label>Feld "group"<input type="text" id="fmGroup" value="group"></label>
+        <label>Feld "type"<input type="text" id="fmType" value="type"></label>
+        <label>Feld "extra"<input type="text" id="fmExtra" value="extra"></label>
+      </div>
+      <div class="row">
+        <label>parentValue<input type="text" id="fmParentValue" value="parent"></label>
+        <label>childValue<input type="text" id="fmChildValue" value="child"></label>
+      </div>
+    </fieldset>
+  </details>
+
+  <!-- ── Check-In Webhooks ────────────────────────────────────────────── -->
+  <fieldset>
+    <legend>Check-In Webhooks <span class="badge">config.js</span></legend>
+    <div id="webhooks"></div>
+    <button type="button" id="addWebhook" class="btn-add">+ Webhook hinzufügen</button>
+    <label class="checkbox" style="margin-top:.75rem">
+      <input type="checkbox" id="blockPrint"> Druck blockieren bis alle Webhooks erfolgreich waren (nicht empfohlen)
+    </label>
+  </fieldset>
+
+  <!-- ── Status-Webhooks ──────────────────────────────────────────────── -->
+  <fieldset>
+    <legend>Status-Webhooks (Drucker-Events) <span class="badge">config.js</span></legend>
+    <div id="statusWebhooks"></div>
+    <button type="button" id="addStatusWebhook" class="btn-add">+ Status-Webhook hinzufügen</button>
+  </fieldset>
+
+</form>
+
+<section class="output-panel">
+  <div class="tabs">
+    <button type="button" class="tab active" data-tab="configjs">config.js</button>
+    <button type="button" class="tab" data-tab="env">.env</button>
+  </div>
+
+  <div class="output-actions">
+    <button type="button" id="copyBtn">Kopieren</button>
+    <button type="button" id="downloadBtn">Herunterladen</button>
+  </div>
+
+  <div id="warnings" class="warnings hidden"></div>
+
+  <pre id="out-configjs" class="output active"><code></code></pre>
+  <pre id="out-env" class="output"><code></code></pre>
+</section>
+
+</main>
+
+<footer class="page-footer">
+  <p>Keine Daten verlassen deinen Browser. Quellcode: <a href="https://github.com/rony326/ct-checkin-printer/tree/main/docs" target="_blank" rel="noopener">docs/</a> in diesem Repo.</p>
+</footer>
+
+<template id="printer-template">
+  <div class="card printer-card">
+    <div class="card-header">
+      <strong class="card-title"></strong>
+      <button type="button" class="btn-remove">Entfernen</button>
+    </div>
+
+    <div class="row">
+      <label>hostname
+        <input type="text" class="p-hostname" placeholder="B2">
+      </label>
+      <label>printerName
+        <input type="text" class="p-printerName" placeholder="Minis">
+      </label>
+    </div>
+
+    <label>Zeitfenster
+      <select class="p-activeTimesMode">
+        <option value="inherit">Globales Zeitfenster erben</option>
+        <option value="always">Immer aktiv (ignoriert globales Zeitfenster)</option>
+        <option value="custom">Eigenes Zeitfenster</option>
+      </select>
+    </label>
+    <label class="p-activeTimesCustomWrap hidden">Eigenes Zeitfenster
+      <input type="text" class="p-activeTimesCustom" placeholder="So:09:00-12:00 18:00-20:00">
+    </label>
+
+    <div class="row">
+      <label class="checkbox"><input type="checkbox" class="p-checkEnabled" checked> Drucker-Check vor Anmeldung</label>
+      <label class="p-checkRetryWrap">Check-Retry-Intervall (ms)
+        <input type="number" class="p-checkRetryIntervalMs" value="30000" min="1000" step="1000">
+      </label>
+      <label class="checkbox"><input type="checkbox" class="p-statusWebhook" checked> Status-Webhook bei Fehler</label>
+    </div>
+
+    <fieldset class="nested">
+      <legend>Retry-Queue</legend>
+      <div class="row wrap">
+        <label>maxRetries<input type="number" class="p-maxRetries" value="5" min="0" step="1"></label>
+        <label>maxAgeMs<input type="number" class="p-maxAgeMs" value="1800000" min="1000" step="1000"></label>
+        <label>retryDelayMs<input type="number" class="p-retryDelayMs" value="30000" min="1000" step="1000"></label>
+        <label class="checkbox"><input type="checkbox" class="p-retryOnPrintError" checked> auch bei Druckfehler in Queue</label>
+      </div>
+    </fieldset>
+
+    <label>Modus
+      <select class="p-mode">
+        <option value="single">Einzel-Modus (ein physischer Drucker)</option>
+        <option value="routing">Routing-Modus (mehrere Etikettentypen → mehrere Drucker)</option>
+      </select>
+    </label>
+
+    <div class="p-single-fields">
+      <div class="row">
+        <label>printerHost (IP)
+          <input type="text" class="p-printerHost" placeholder="192.168.1.50">
+        </label>
+        <label>printerPort
+          <input type="number" class="p-printerPort" value="9100" min="1" step="1">
+        </label>
+      </div>
+    </div>
+
+    <div class="p-routing-fields hidden">
+      <div class="labels-list"></div>
+      <button type="button" class="btn-add btn-add-label">+ Etikettentyp hinzufügen</button>
+    </div>
+  </div>
+</template>
+
+<template id="label-route-template">
+  <div class="card label-route-card">
+    <div class="card-header">
+      <strong class="card-title">Etikettentyp</strong>
+      <button type="button" class="btn-remove">Entfernen</button>
+    </div>
+    <div class="row wrap">
+      <label>type (Key aus CT-Template)
+        <input type="text" class="lr-type" placeholder="parent">
+      </label>
+      <label>printerHost (IP)
+        <input type="text" class="lr-printerHost" placeholder="192.168.1.51">
+      </label>
+      <label>printerPort
+        <input type="number" class="lr-printerPort" value="9100" min="1" step="1">
+      </label>
+      <label>labelType
+        <input type="text" class="lr-labelType" value="54">
+      </label>
+      <label>rotate
+        <select class="lr-rotate">
+          <option value="0" selected>0</option>
+          <option value="90">90</option>
+          <option value="180">180</option>
+          <option value="270">270</option>
+        </select>
+      </label>
+      <label>copies
+        <input type="number" class="lr-copies" value="1" min="1" step="1">
+      </label>
+      <label class="checkbox"><input type="checkbox" class="lr-enabled" checked> enabled</label>
+    </div>
+    <label>also[] — zusätzlich drucken (kommagetrennt, type-Namen)
+      <input type="text" class="lr-also" placeholder="leader">
+    </label>
+  </div>
+</template>
+
+<template id="webhook-template">
+  <div class="card webhook-card">
+    <div class="card-header">
+      <strong class="card-title">Webhook</strong>
+      <button type="button" class="btn-remove">Entfernen</button>
+    </div>
+    <div class="row wrap">
+      <label>name
+        <input type="text" class="wh-name" placeholder="Prod">
+      </label>
+      <label>url
+        <input type="text" class="wh-url" placeholder="https://meinserver.ch/webhook">
+      </label>
+      <label>method
+        <select class="wh-method">
+          <option value="POST" selected>POST</option>
+          <option value="GET">GET</option>
+        </select>
+      </label>
+    </div>
+    <div class="row wrap">
+      <label>secret
+        <select class="wh-secretMode">
+          <option value="none">Kein Secret</option>
+          <option value="env" selected>env:VAR_NAME (empfohlen)</option>
+        </select>
+      </label>
+      <label class="wh-secretVarWrap">Umgebungsvariable
+        <input type="text" class="wh-secretVar" placeholder="WEBHOOK_SECRET_PROD">
+      </label>
+      <label>retry<input type="number" class="wh-retry" value="3" min="0" step="1"></label>
+      <label>retryMs<input type="number" class="wh-retryMs" value="2000" min="0" step="500"></label>
+      <label class="checkbox"><input type="checkbox" class="wh-enabled" checked> enabled</label>
+    </div>
+  </div>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>
