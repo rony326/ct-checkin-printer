@@ -392,12 +392,20 @@ Definiert Layout und Inhalt pro Etikettentyp. Der Key entspricht dem `type`-Feld
 
 | type | Felder | Beschreibung |
 |---|---|---|
-| `text` | `field`, `font_size`, `bold`, `align`, `prefix`, `gap_after_mm` | Textfeld aus CT-Daten |
-| `static` | `value`, `font_size`, `bold`, `align`, `gap_after_mm` | Fixer Freitext |
+| `text` | `field`, `font_size`, `font`, `bold`, `align`, `prefix`, `gap_after_mm` | Textfeld aus CT-Daten |
+| `static` | `value`, `font_size`, `font`, `bold`, `align`, `gap_after_mm` | Fixer Freitext |
 | `logo` | `image`, `height_mm`, `align`, `gap_after_mm` | Bilddatei (PNG/JPG) |
 | `qr` | `size_mm`, `align`, `gap_after_mm` | QR-Code aus SHA1-Hash |
 
 **Verfügbare Felder:** `name` `id` `code` `group` `extra`
+
+**Custom Font:** `font` — optionaler Pfad zu einer `.ttf`/`.otf`-Datei (relativ zum
+Arbeitsverzeichnis des Dienstes), gilt pro Block bei `text` und `static`.
+Fehlt der Pfad oder lässt sich die Datei nicht laden, fällt automatisch auf
+den Systemfont zurück (`bold` bestimmt dann Regular/Bold-Variante):
+```json
+{ "type": "static", "value": "Leiter", "font": "./fonts/MeineSchrift.ttf", "font_size": 24, "align": "center" }
+```
 
 **Ausrichtung:** `left` `center` `right`
 

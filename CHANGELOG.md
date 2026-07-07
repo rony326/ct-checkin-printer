@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### ✨ Neu
+
+- **Custom Fonts** (#13) — `text`- und `static`-Blöcke in `label-layout.json`
+  akzeptieren jetzt ein optionales `font`-Feld (Pfad zu `.ttf`/`.otf`).
+  Fehlt der Pfad oder ist die Datei nicht ladbar, fällt der Dienst automatisch
+  auf den bisherigen Systemfont zurück (`bold` bestimmt weiterhin Regular/Bold).
+
 ## [1.3.0-beta.2] — 2026-07-06
 
 Umfassende Sicherheits-, Zuverlässigkeits- und Installations-Härtung nach

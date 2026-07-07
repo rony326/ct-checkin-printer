@@ -92,10 +92,21 @@ def mask_pii(value):
 
 _font_cache = {}
 
-def get_font(size, bold=False):
-    key = (size, bold)
+def get_font(size, bold=False, font_path=None):
+    key = (size, bold, font_path)
     if key in _font_cache:
         return _font_cache[key]
+
+    # Custom Font aus label-layout.json (block.font) hat Vorrang — schlägt
+    # das fehl (Pfad falsch/Datei kaputt), auf Systemfont zurückfallen (#13)
+    if font_path:
+        try:
+            font = ImageFont.truetype(font_path, size)
+            _font_cache[key] = font
+            return font
+        except (IOError, OSError) as e:
+            print('WARNUNG: Custom-Font nicht ladbar ({}): {} — Fallback auf Systemfont'.format(font_path, e), file=sys.stderr)
+
     candidates = [
         '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'         if bold else
         '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
@@ -291,7 +302,7 @@ def render_label(parsed, layout_def, print_width, qr_hash=None, exact_height_px=
             bold      = block.get('bold', False)
             align     = block.get('align', 'left')
             value     = block.get('value', '')
-            font      = get_font(font_size, bold)
+            font      = get_font(font_size, bold, block.get('font'))
 
             if value:
                 bbox = draw.textbbox((0, 0), value, font=font)
@@ -314,7 +325,7 @@ def render_label(parsed, layout_def, print_width, qr_hash=None, exact_height_px=
             bold      = block.get('bold', False)
             prefix    = block.get('prefix', '')
             align     = block.get('align', 'left')
-            font      = get_font(font_size, bold)
+            font      = get_font(font_size, bold, block.get('font'))
 
             values = parsed.get('extra') or [] if field == 'extra' else (
                 [prefix + parsed[field]] if parsed.get(field) else []
