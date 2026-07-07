@@ -16,8 +16,8 @@
     per Formular. Alles läuft lokal im Browser — es wird nichts an einen Server gesendet.
   </p>
   <p class="hint">
-    <code>label-layout.json</code> wird hier (noch) nicht generiert — dafür weiterhin die
-    <a href="https://github.com/rony326/ct-checkin-printer#label-layoutjson" target="_blank" rel="noopener">README-Doku</a> verwenden.
+    Erzeugt auch <code>label-layout.json</code> — Details zu den Blocktypen in der
+    <a href="https://github.com/rony326/ct-checkin-printer#label-layoutjson" target="_blank" rel="noopener">README-Doku</a>.
   </p>
 </header>
 
@@ -182,12 +182,28 @@
     <button type="button" id="addStatusWebhook" class="btn-add">+ Status-Webhook hinzufügen</button>
   </fieldset>
 
+  <!-- ── Label-Layout ─────────────────────────────────────────────────── -->
+  <fieldset>
+    <legend>Label-Layout <span class="badge">label-layout.json</span></legend>
+    <p class="hint">
+      Ein Eintrag pro Etikettentyp (Key = <code>type</code>-Feld aus dem CT-Template, z.B. <code>parent</code>).
+      Verfügbare Felder für Textblöcke: <code>name</code> <code>id</code> <code>code</code> <code>group</code> <code>extra</code>.
+      Blöcke werden von oben nach unten aufs Etikett gedruckt.
+    </p>
+    <div id="labelLayouts"></div>
+    <div class="row">
+      <button type="button" id="addLayoutType" class="btn-add">+ Etikettentyp hinzufügen</button>
+      <button type="button" id="importLayoutTypes" class="btn-add">Typen aus Routing übernehmen</button>
+    </div>
+  </fieldset>
+
 </form>
 
 <section class="output-panel">
   <div class="tabs">
     <button type="button" class="tab active" data-tab="configjs">config.js</button>
     <button type="button" class="tab" data-tab="env">.env</button>
+    <button type="button" class="tab" data-tab="labellayout">label-layout.json</button>
   </div>
 
   <div class="output-actions">
@@ -199,6 +215,7 @@
 
   <pre id="out-configjs" class="output active"><code></code></pre>
   <pre id="out-env" class="output"><code></code></pre>
+  <pre id="out-labellayout" class="output"><code></code></pre>
 </section>
 
 </main>
@@ -348,6 +365,102 @@
       <label>retry<input type="number" class="wh-retry" value="3" min="0" step="1"></label>
       <label>retryMs<input type="number" class="wh-retryMs" value="2000" min="0" step="500"></label>
       <label class="checkbox"><input type="checkbox" class="wh-enabled" checked> enabled</label>
+    </div>
+  </div>
+</template>
+
+<template id="layout-type-template">
+  <div class="card layout-type-card">
+    <div class="card-header">
+      <strong class="card-title">Etikettentyp</strong>
+      <button type="button" class="btn-remove">Entfernen</button>
+    </div>
+    <div class="row wrap">
+      <label>type (Key in label-layout.json)
+        <input type="text" class="lt-type" placeholder="parent">
+      </label>
+      <label>length_mm
+        <input type="number" class="lt-lengthMm" value="50" min="1" step="1">
+      </label>
+      <label>padding_mm
+        <input type="number" class="lt-paddingMm" value="2" min="0" step="0.5">
+      </label>
+      <label>line_spacing_mm
+        <input type="number" class="lt-lineSpacingMm" value="0.8" min="0" step="0.1">
+      </label>
+    </div>
+    <div class="blocks-list"></div>
+    <button type="button" class="btn-add btn-add-block">+ Block hinzufügen</button>
+  </div>
+</template>
+
+<template id="layout-block-template">
+  <div class="card layout-block-card">
+    <div class="card-header">
+      <strong class="card-title">Block</strong>
+      <div class="block-actions">
+        <button type="button" class="btn-move-up" title="Nach oben">↑</button>
+        <button type="button" class="btn-move-down" title="Nach unten">↓</button>
+        <button type="button" class="btn-remove">Entfernen</button>
+      </div>
+    </div>
+    <div class="row wrap">
+      <label>Blocktyp
+        <select class="lb-type">
+          <option value="text" selected>text — Feld aus CT-Daten</option>
+          <option value="static">static — Fixer Text</option>
+          <option value="logo">logo — Bilddatei</option>
+          <option value="qr">qr — QR-Code</option>
+        </select>
+      </label>
+
+      <label class="lb-field-wrap">field
+        <select class="lb-field">
+          <option value="name" selected>name</option>
+          <option value="id">id</option>
+          <option value="code">code</option>
+          <option value="group">group</option>
+          <option value="extra">extra</option>
+        </select>
+      </label>
+
+      <label class="lb-value-wrap hidden">value
+        <input type="text" class="lb-value" placeholder="Leiter">
+      </label>
+
+      <label class="lb-image-wrap hidden">image
+        <input type="text" class="lb-image" placeholder="logo.png">
+      </label>
+
+      <label class="lb-fontSize-wrap">font_size
+        <input type="number" class="lb-fontSize" value="36" min="1" step="1">
+      </label>
+
+      <label class="lb-heightMm-wrap hidden">height_mm
+        <input type="number" class="lb-heightMm" value="10" min="1" step="1">
+      </label>
+
+      <label class="lb-sizeMm-wrap hidden">size_mm
+        <input type="number" class="lb-sizeMm" value="20" min="1" step="1">
+      </label>
+
+      <label class="lb-align-wrap">align
+        <select class="lb-align">
+          <option value="left" selected>left</option>
+          <option value="center">center</option>
+          <option value="right">right</option>
+        </select>
+      </label>
+
+      <label class="checkbox lb-bold-wrap"><input type="checkbox" class="lb-bold"> bold</label>
+
+      <label class="lb-prefix-wrap">prefix
+        <input type="text" class="lb-prefix" placeholder="Abholcode: ">
+      </label>
+
+      <label>gap_after_mm
+        <input type="number" class="lb-gapAfterMm" value="0" min="0" step="0.5">
+      </label>
     </div>
   </div>
 </template>

@@ -44,6 +44,9 @@ const printersContainer   = document.getElementById('printers');
 const printerTemplate     = document.getElementById('printer-template');
 const labelRouteTemplate  = document.getElementById('label-route-template');
 const webhookTemplate     = document.getElementById('webhook-template');
+const labelLayoutsContainer = document.getElementById('labelLayouts');
+const layoutTypeTemplate    = document.getElementById('layout-type-template');
+const layoutBlockTemplate   = document.getElementById('layout-block-template');
 
 function addPrinter(defaults = {}) {
   const frag = printerTemplate.content.cloneNode(true);
@@ -157,6 +160,86 @@ function addWebhookRow(container, defaults = {}) {
   return container.lastElementChild;
 }
 
+/* ── Dynamic list: label-layout ───────────────────────────────────────────── */
+
+const LB_FIELDS_BY_TYPE = {
+  text:   ['field', 'fontSize', 'align', 'bold', 'prefix'],
+  static: ['value', 'fontSize', 'align', 'bold'],
+  logo:   ['image', 'heightMm', 'align'],
+  qr:     ['sizeMm', 'align'],
+};
+
+function syncBlockVisibility(card) {
+  const type = val(card, '.lb-type');
+  const shown = new Set(LB_FIELDS_BY_TYPE[type] || []);
+  ['field', 'value', 'image', 'fontSize', 'heightMm', 'sizeMm', 'align', 'bold', 'prefix'].forEach(f => {
+    const wrap = card.querySelector(`.lb-${f}-wrap`);
+    if (wrap) wrap.classList.toggle('hidden', !shown.has(f));
+  });
+}
+
+function addLayoutBlock(listEl, defaults = {}) {
+  const frag = layoutBlockTemplate.content.cloneNode(true);
+  const card = frag.querySelector('.layout-block-card');
+
+  if (defaults.type) card.querySelector('.lb-type').value = defaults.type;
+  if (defaults.field) card.querySelector('.lb-field').value = defaults.field;
+  if (defaults.prefix) card.querySelector('.lb-prefix').value = defaults.prefix;
+  if (defaults.fontSize) card.querySelector('.lb-fontSize').value = defaults.fontSize;
+
+  card.querySelector('.lb-type').addEventListener('change', () => { syncBlockVisibility(card); render(); });
+  card.querySelector('.btn-move-up').addEventListener('click', () => {
+    const prev = card.previousElementSibling;
+    if (prev) listEl.insertBefore(card, prev);
+    render();
+  });
+  card.querySelector('.btn-move-down').addEventListener('click', () => {
+    const next = card.nextElementSibling;
+    if (next) listEl.insertBefore(next, card);
+    render();
+  });
+  card.querySelector('.btn-remove').addEventListener('click', () => {
+    card.remove();
+    render();
+  });
+
+  listEl.appendChild(frag);
+  const appended = listEl.lastElementChild;
+  syncBlockVisibility(appended);
+  return appended;
+}
+
+function addLayoutType(defaults = {}) {
+  const frag = layoutTypeTemplate.content.cloneNode(true);
+  const card = frag.querySelector('.layout-type-card');
+
+  if (defaults.type) card.querySelector('.lt-type').value = defaults.type;
+
+  card.querySelector('.btn-remove').addEventListener('click', () => {
+    card.remove();
+    render();
+  });
+  card.querySelector('.btn-add-block').addEventListener('click', () => {
+    addLayoutBlock(card.querySelector('.blocks-list'));
+    render();
+  });
+
+  labelLayoutsContainer.appendChild(frag);
+  const appended = labelLayoutsContainer.lastElementChild;
+
+  (defaults.blocks || []).forEach(b => addLayoutBlock(appended.querySelector('.blocks-list'), b));
+
+  updateLayoutTypeTitles();
+  return appended;
+}
+
+function updateLayoutTypeTitles() {
+  labelLayoutsContainer.querySelectorAll('.layout-type-card').forEach((card, i) => {
+    const type = val(card, '.lt-type');
+    card.querySelector('.card-title').textContent = type ? `Etikettentyp: ${type}` : `Etikettentyp #${i + 1}`;
+  });
+}
+
 /* ── Collect DOM state ────────────────────────────────────────────────────── */
 
 function collectPrinter(card) {
@@ -212,6 +295,49 @@ function collectWebhook(card) {
   };
 }
 
+function collectLayoutBlock(bc) {
+  const type = val(bc, '.lb-type');
+  const block = { type };
+
+  if (type === 'text') {
+    block.field = val(bc, '.lb-field');
+    block.font_size = num(bc, '.lb-fontSize');
+    block.bold = checked(bc, '.lb-bold');
+    block.align = val(bc, '.lb-align');
+    const prefix = val(bc, '.lb-prefix');
+    if (prefix) block.prefix = prefix;
+    block.gap_after_mm = num(bc, '.lb-gapAfterMm');
+  } else if (type === 'static') {
+    block.value = val(bc, '.lb-value');
+    block.font_size = num(bc, '.lb-fontSize');
+    block.bold = checked(bc, '.lb-bold');
+    block.align = val(bc, '.lb-align');
+    block.gap_after_mm = num(bc, '.lb-gapAfterMm');
+  } else if (type === 'logo') {
+    block.image = val(bc, '.lb-image');
+    block.height_mm = num(bc, '.lb-heightMm');
+    block.align = val(bc, '.lb-align');
+    block.gap_after_mm = num(bc, '.lb-gapAfterMm');
+  } else if (type === 'qr') {
+    block.size_mm = num(bc, '.lb-sizeMm');
+    block.align = val(bc, '.lb-align');
+    block.gap_after_mm = num(bc, '.lb-gapAfterMm');
+  }
+
+  return block;
+}
+
+function collectLayoutType(card) {
+  const blocks = Array.from(card.querySelectorAll('.layout-block-card')).map(collectLayoutBlock);
+  return {
+    type: val(card, '.lt-type').trim(),
+    length_mm: num(card, '.lt-lengthMm'),
+    padding_mm: num(card, '.lt-paddingMm'),
+    line_spacing_mm: num(card, '.lt-lineSpacingMm'),
+    blocks,
+  };
+}
+
 function collect() {
   const printerLabelTypeSelect = document.getElementById('printerLabelType').value;
   const printerLabelType = printerLabelTypeSelect === 'custom'
@@ -254,6 +380,8 @@ function collect() {
     webhooks: Array.from(document.querySelectorAll('#webhooks .webhook-card')).map(collectWebhook),
     statusWebhooks: Array.from(document.querySelectorAll('#statusWebhooks .webhook-card')).map(collectWebhook),
     blockPrint: document.getElementById('blockPrint').checked,
+
+    labelLayouts: Array.from(labelLayoutsContainer.querySelectorAll('.layout-type-card')).map(collectLayoutType),
   };
 }
 
@@ -445,6 +573,16 @@ DRY_RUN=${s.dryRun}
 ${secretsBlock}`;
 }
 
+function generateLabelLayoutJson(s) {
+  const obj = {};
+  s.labelLayouts.forEach(lt => {
+    if (!lt.type) return;
+    const { type, ...rest } = lt;
+    obj[type] = rest;
+  });
+  return JSON.stringify(obj, null, 2) + '\n';
+}
+
 /* ── Warnings ─────────────────────────────────────────────────────────────── */
 
 function computeWarnings(s) {
@@ -488,6 +626,21 @@ function computeWarnings(s) {
     if (w.secretMode === 'env' && !w.secretVar) warnings.push(`Status-Webhook #${i + 1}: Umgebungsvariable für Secret fehlt.`);
   });
 
+  const layoutTypes = new Set();
+  s.labelLayouts.forEach((lt, i) => {
+    const n = i + 1;
+    if (!lt.type) { warnings.push(`Label-Layout #${n}: type fehlt.`); return; }
+    if (layoutTypes.has(lt.type)) warnings.push(`Label-Layout: type "${lt.type}" ist mehrfach vergeben.`);
+    layoutTypes.add(lt.type);
+    if (!lt.blocks.length) warnings.push(`Label-Layout "${lt.type}": kein Block vorhanden.`);
+    lt.blocks.forEach((b, bi) => {
+      const bn = bi + 1;
+      if (b.type === 'text' && !b.field) warnings.push(`Label-Layout "${lt.type}", Block #${bn}: field fehlt.`);
+      if (b.type === 'static' && !b.value) warnings.push(`Label-Layout "${lt.type}", Block #${bn}: value fehlt.`);
+      if (b.type === 'logo' && !b.image) warnings.push(`Label-Layout "${lt.type}", Block #${bn}: image fehlt.`);
+    });
+  });
+
   return warnings;
 }
 
@@ -495,10 +648,12 @@ function computeWarnings(s) {
 
 const outConfigJs = document.querySelector('#out-configjs code');
 const outEnv = document.querySelector('#out-env code');
+const outLabelLayout = document.querySelector('#out-labellayout code');
 const warningsEl = document.getElementById('warnings');
 
 function render() {
   updatePrinterTitles();
+  updateLayoutTypeTitles();
 
   document.querySelectorAll('[data-hint-for]').forEach(span => {
     const input = document.getElementById(span.dataset.hintFor);
@@ -512,6 +667,7 @@ function render() {
   const s = collect();
   outConfigJs.textContent = generateConfigJs(s);
   outEnv.textContent = generateEnv(s);
+  outLabelLayout.textContent = generateLabelLayoutJson(s);
 
   const warnings = computeWarnings(s);
   warningsEl.textContent = '';
@@ -541,6 +697,26 @@ document.getElementById('addPrinter').addEventListener('click', () => addPrinter
 document.getElementById('addWebhook').addEventListener('click', () => addWebhookRow(document.getElementById('webhooks')));
 document.getElementById('addStatusWebhook').addEventListener('click', () => addWebhookRow(document.getElementById('statusWebhooks'), { enabled: false }));
 
+document.getElementById('addLayoutType').addEventListener('click', () => { addLayoutType(); render(); });
+
+document.getElementById('importLayoutTypes').addEventListener('click', () => {
+  const existing = new Set(
+    Array.from(labelLayoutsContainer.querySelectorAll('.lt-type')).map(el => el.value.trim()).filter(Boolean)
+  );
+  const fromRouting = new Set(
+    Array.from(document.querySelectorAll('.lr-type')).map(el => el.value.trim()).filter(Boolean)
+  );
+  let added = 0;
+  fromRouting.forEach(type => {
+    if (!existing.has(type)) {
+      addLayoutType({ type, blocks: [{ type: 'text', field: 'name' }] });
+      added++;
+    }
+  });
+  if (!added) alert('Keine neuen Etikettentypen im Routing gefunden (oder bereits alle vorhanden).');
+  render();
+});
+
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -563,9 +739,11 @@ document.getElementById('copyBtn').addEventListener('click', async () => {
   }
 });
 
+const DOWNLOAD_FILENAMES = { configjs: 'config.js', env: '.env', labellayout: 'label-layout.json' };
+
 document.getElementById('downloadBtn').addEventListener('click', () => {
   const activeTab = document.querySelector('.tab.active').dataset.tab;
-  const filename = activeTab === 'configjs' ? 'config.js' : '.env';
+  const filename = DOWNLOAD_FILENAMES[activeTab] || 'output.txt';
   const content = document.querySelector('.output.active code').textContent;
   const blob = new Blob([content], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
@@ -581,5 +759,13 @@ document.getElementById('downloadBtn').addEventListener('click', () => {
 addPrinter({ hostname: 'B2', printerName: 'Minis', printerHost: '192.168.1.50' });
 addWebhookRow(document.getElementById('webhooks'), { name: 'Prod', url: 'https://meinserver.ch/checkin/webhook' });
 addWebhookRow(document.getElementById('statusWebhooks'), { name: 'Alert', url: 'https://meinserver.ch/printer/alert', enabled: false });
+
+addLayoutType({
+  type: 'parent',
+  blocks: [
+    { type: 'text', field: 'name', fontSize: 52 },
+    { type: 'text', field: 'code', fontSize: 36, prefix: 'Abholcode: ' },
+  ],
+});
 
 render();

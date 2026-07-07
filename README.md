@@ -103,9 +103,9 @@ ersetzt werden — sonst `ModuleNotFoundError`, da die Pakete nur im venv liegen
 
 ## Konfiguration
 
-> **Config-Generator:** [rony326.github.io/ct-checkin-printer](https://rony326.github.io/ct-checkin-printer/) erzeugt `config.js` und `.env`
-> per Formular (läuft komplett im Browser, keine Daten verlassen den Rechner). Deckt aktuell noch nicht
-> `label-layout.json` ab — dafür weiterhin die Doku unten verwenden. Quellcode: [`docs/`](docs/).
+> **Config-Generator:** [rony326.github.io/ct-checkin-printer](https://rony326.github.io/ct-checkin-printer/) erzeugt `config.js`,
+> `.env` und `label-layout.json` per Formular (läuft komplett im Browser, keine Daten verlassen den Rechner).
+> Quellcode: [`docs/`](docs/).
 
 ### .env
 
