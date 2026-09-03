@@ -38,6 +38,13 @@ export function LayoutList() {
     }
   }
 
+  async function handleDelete(event: React.MouseEvent, layoutId: number) {
+    event.stopPropagation();
+    if (!window.confirm('Dieses Etiketten-Layout wirklich löschen?')) return;
+    await api.delete(`/api/label-layouts/${layoutId}`);
+    await load();
+  }
+
   function mediaName(id: number | null): string {
     if (id === null) return '—';
     return mediaTypes.find((m) => m.id === id)?.name ?? `#${id}`;
@@ -100,6 +107,7 @@ export function LayoutList() {
                 <th>Etikettentyp</th>
                 <th>Grösse</th>
                 <th>Elemente</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -109,6 +117,11 @@ export function LayoutList() {
                   <td className="mono">{layout.ctTypeKey}</td>
                   <td>{mediaName(layout.mediaId)}</td>
                   <td>{layout.elementsJson.length}</td>
+                  <td>
+                    <button className="btn btn-danger" onClick={(e) => handleDelete(e, layout.id)}>
+                      Löschen
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
