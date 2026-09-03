@@ -1,11 +1,13 @@
 import { buildServer } from './api/server.js';
 import { createDb } from './db/client.js';
+import { seedMediaTypes } from './db/seed.js';
 import { loadEnv } from './env.js';
 import { PrintOrchestrator } from './orchestrator/PrintOrchestrator.js';
 
 async function main() {
   const env = loadEnv();
   const db = createDb(env.DB_PATH);
+  seedMediaTypes(db);
   const orchestrator = new PrintOrchestrator({ db, env });
   const app = await buildServer(db, env, orchestrator);
 
