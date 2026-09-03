@@ -185,9 +185,11 @@ function IncomingSection() {
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           {webhooks.map((w) => (
             <li key={w.id} style={{ borderBottom: '1px solid var(--line)', paddingBottom: '0.75rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="mono">/api/webhooks/in/{w.pathToken}</span>
-                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                <span className="mono" style={{ overflowWrap: 'anywhere' }}>
+                  /api/webhooks/in/{w.pathToken}
+                </span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
                   <label style={{ fontSize: '0.8rem' }}>
                     <input type="checkbox" checked={w.enabled} onChange={(e) => handleToggle(w.id, e.target.checked)} /> Aktiv
                   </label>
