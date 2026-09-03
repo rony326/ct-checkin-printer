@@ -233,7 +233,7 @@ describe('Printers API', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('lehnt einen doppelten Hostname ab', async () => {
+  it('erlaubt mehrere Drucker mit demselben Hostname (virtueller Drucker mit mehreren physischen Beinen, siehe v1-Routing-Modus)', async () => {
     await app.inject({
       method: 'POST',
       url: '/api/printers',
@@ -246,7 +246,7 @@ describe('Printers API', () => {
       headers: { cookie: sessionCookie, 'content-type': 'application/json' },
       payload: { name: 'B', hostname: 'DUP', vendor: 'brother-ql', host: '192.168.1.61' },
     });
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(201);
   });
 
   it('hebt beim Löschen die Layout-Zuordnung auf statt das Layout zu löschen', async () => {

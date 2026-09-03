@@ -53,7 +53,7 @@ describe('PrintPipeline.processIncomingJob', () => {
     const adapter = makeAdapter();
     const pipeline = new PrintPipeline({ db, env, adapters: { getAdapter: async () => adapter } });
 
-    const result = await pipeline.processIncomingJob(printer.id, RAW_DATA, () => 1735600000000);
+    const result = await pipeline.processIncomingJob(printer.hostname, RAW_DATA, () => 1735600000000);
 
     expect(result.enriched).toBe(true);
     expect(result.printed).toBe(1);
@@ -75,7 +75,7 @@ describe('PrintPipeline.processIncomingJob', () => {
     const printer = makePrinter('B1');
     const pipeline = new PrintPipeline({ db, env, adapters: { getAdapter: async () => makeAdapter() } });
 
-    const result = await pipeline.processIncomingJob(printer.id, '   ', () => Date.now());
+    const result = await pipeline.processIncomingJob(printer.hostname, '   ', () => Date.now());
 
     expect(result.enriched).toBe(false);
     expect(db.select().from(printLog).all()).toHaveLength(0);
@@ -89,7 +89,7 @@ describe('PrintPipeline.processIncomingJob', () => {
     const adapter = makeAdapter({ getStatus: vi.fn(async () => notReadyStatus) });
     const pipeline = new PrintPipeline({ db, env, adapters: { getAdapter: async () => adapter } });
 
-    const result = await pipeline.processIncomingJob(printer.id, RAW_DATA, () => 1735600000000);
+    const result = await pipeline.processIncomingJob(printer.hostname, RAW_DATA, () => 1735600000000);
 
     expect(result.printed).toBe(0);
     expect(result.queued).toBe(1);
@@ -112,7 +112,7 @@ describe('PrintPipeline.processIncomingJob', () => {
     const adapter = makeAdapter({ printLabel: vi.fn(async () => ({ success: false, errorMessage: 'Kabel raus' })) });
     const pipeline = new PrintPipeline({ db, env, adapters: { getAdapter: async () => adapter } });
 
-    const result = await pipeline.processIncomingJob(printer.id, RAW_DATA, () => 1735600000000);
+    const result = await pipeline.processIncomingJob(printer.hostname, RAW_DATA, () => 1735600000000);
 
     expect(result.queued).toBe(1);
     const [queued] = db.select().from(printQueue).all();
@@ -124,7 +124,7 @@ describe('PrintPipeline.processIncomingJob', () => {
     const printer = makePrinter('B1');
     const pipeline = new PrintPipeline({ db, env, adapters: { getAdapter: async () => makeAdapter() } });
 
-    const result = await pipeline.processIncomingJob(printer.id, RAW_DATA, () => 1735600000000);
+    const result = await pipeline.processIncomingJob(printer.hostname, RAW_DATA, () => 1735600000000);
 
     expect(result.enriched).toBe(true);
     expect(result.printed).toBe(0);
@@ -156,7 +156,7 @@ describe('PrintPipeline.processIncomingJob', () => {
       adapters: { getAdapter: async (p) => (p.id === printerA.id ? adapterA : adapterB) },
     });
 
-    const result = await pipeline.processIncomingJob(printerA.id, RAW_DATA, () => 1735600000000);
+    const result = await pipeline.processIncomingJob(printerA.hostname, RAW_DATA, () => 1735600000000);
 
     expect(result.printed).toBe(2);
     expect(adapterA.printLabel).toHaveBeenCalledTimes(1);

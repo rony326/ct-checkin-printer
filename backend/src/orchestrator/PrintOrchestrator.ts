@@ -42,7 +42,8 @@ function toPollerPrinter(row: typeof printers.$inferSelect): PrinterPollerPrinte
 
 /**
  * Bauschritt 9: komponiert Adapter-Registry, Druck-Pipeline, einen
- * `PrinterPoller` je konfiguriertem Drucker und einen druckerübergreifenden
+ * `PrinterPoller` je Hostnamen-Gruppe (siehe `printers.hostname`-Kommentar in
+ * db/schema.ts) und einen druckerübergreifenden
  * `QueueMonitor` zu einem laufenden Dienst — ersetzt v1s `index.js`, das
  * dieselbe Verdrahtung prozedural für Einzel-/Routing-Modus getrennt
  * vornahm (siehe Plan, "PrintOrchestrator").
@@ -90,11 +91,24 @@ export class PrintOrchestrator {
     }
 
     const printerRows = this.db.select().from(printers).all();
-    this.pollers = printerRows.map((row) => {
+    // Nach Hostname gruppieren, NICHT ein Poller je Zeile — mehrere Zeilen
+    // mit demselben Hostnamen sind physische Beine desselben ChurchTools-Orts
+    // (siehe db/schema.ts, routing.ts) und dürfen nicht doppelt bei
+    // ChurchTools pollen/anmelden, sonst würde derselbe Check-in doppelt
+    // verarbeitet.
+    const groupsByHostname = new Map<string, (typeof printerRows)[number][]>();
+    for (const row of printerRows) {
+      const group = groupsByHostname.get(row.hostname) ?? [];
+      group.push(row);
+      groupsByHostname.set(row.hostname, group);
+    }
+
+    this.pollers = [...groupsByHostname.values()].map((group) => {
+      const legs = [...group].sort((a, b) => a.id - b.id).map(toPollerPrinter);
       const poller = new PrinterPoller({
         db: this.db,
         env: this.env,
-        printer: toPollerPrinter(row),
+        printers: legs,
         client,
         pipeline,
         adapters,
@@ -142,7 +156,7 @@ export class PrintOrchestrator {
     const printer = this.db.select().from(printers).where(eq(printers.hostname, hostname)).get();
     if (!printer) return { ok: false, message: `Unbekannter Drucker-Hostname "${hostname}"` };
 
-    const result = await this.pipeline.processIncomingJob(printer.id, rawData);
+    const result = await this.pipeline.processIncomingJob(hostname, rawData);
     return { ok: true, printed: result.printed, queued: result.queued };
   }
 

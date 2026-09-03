@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { collectFontAndLogoIds, toMediaDefinition } from '../api/labelLayouts.js';
 import { PrinterStatus, type LabelPrinterAdapter } from '../adapters/printer/types.js';
 import type { AdapterRegistryPrinter } from './adapterRegistry.js';
@@ -45,15 +45,19 @@ interface LayoutPrintOutcome {
 export class PrintPipeline {
   constructor(private readonly deps: PrintPipelineDeps) {}
 
-  async processIncomingJob(printerId: number, rawData: string, now: () => number = Date.now): Promise<ProcessIncomingJobResult> {
+  async processIncomingJob(hostname: string, rawData: string, now: () => number = Date.now): Promise<ProcessIncomingJobResult> {
     if (!rawData || !rawData.trim()) return { enriched: false, printed: 0, queued: 0 };
 
-    const originPrinter = this.getPrinterRow(printerId);
+    // Repräsentativer Drucker-Datensatz für diesen Hostnamen, nur für die
+    // Check-in-Webhook-Identität (name/host) — bei mehreren physischen Beinen
+    // unter demselben Hostnamen (siehe routing.ts) ist das der zuerst
+    // angelegte; das eigentliche Ziel je Etikett bestimmt `layout.printerId`.
+    const originPrinter = this.getPrimaryPrinterByHostname(hostname);
     if (!originPrinter) return { enriched: false, printed: 0, queued: 0 };
 
     const parsed = parseCheckinData(rawData);
     const unixTimestampSeconds = Math.floor(now() / 1000);
-    const layouts = resolveLayoutsForJob(this.deps.db, printerId, parsed.type ?? '');
+    const layouts = resolveLayoutsForJob(this.deps.db, hostname, parsed.type ?? '');
 
     let printed = 0;
     let queued = 0;
@@ -64,7 +68,7 @@ export class PrintPipeline {
       } else {
         queued++;
         enqueueJob(this.deps.db, {
-          printerId: layout.printerId ?? printerId,
+          printerId: layout.printerId ?? originPrinter.id,
           layoutId: layout.id,
           payload: { rawData, unixTimestampSeconds },
           reason: outcome.errorMessage ?? 'Unbekannter Fehler',
@@ -155,6 +159,10 @@ export class PrintPipeline {
 
   private getPrinterRow(printerId: number) {
     return this.deps.db.select().from(printers).where(eq(printers.id, printerId)).get();
+  }
+
+  private getPrimaryPrinterByHostname(hostname: string) {
+    return this.deps.db.select().from(printers).where(eq(printers.hostname, hostname)).orderBy(asc(printers.id)).get();
   }
 
   private getLayoutRow(layoutId: number): LabelLayoutRow | undefined {

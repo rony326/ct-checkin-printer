@@ -29,6 +29,13 @@
       "when": 1788444537258,
       "tag": "0003_abandoned_blonde_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788467785339,
+      "tag": "0004_daily_madame_web",
+      "breakpoints": true
     }
   ]
 }

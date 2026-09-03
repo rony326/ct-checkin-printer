@@ -23,7 +23,7 @@ export interface PrinterPollerPrinter {
 }
 
 export interface PrinterPollerPipeline {
-  processIncomingJob(printerId: number, rawData: string): Promise<{ enriched: boolean; printed: number; queued: number }>;
+  processIncomingJob(hostname: string, rawData: string): Promise<{ enriched: boolean; printed: number; queued: number }>;
 }
 
 export interface PrinterPollerAdapters {
@@ -33,7 +33,15 @@ export interface PrinterPollerAdapters {
 export interface PrinterPollerDeps {
   db: Db;
   env: Env;
-  printer: PrinterPollerPrinter;
+  /**
+   * Alle physischen Beine desselben ChurchTools-Hostnamens (siehe
+   * db/schema.ts `printers.hostname`-Kommentar), index 0 = "primär" — dessen
+   * hostname/name/Zeitfenster/checkEnabled/statusWebhookEnabled gelten für
+   * die ganze Gruppe (v1-Vorbild: EIN checkEnabled/activeTimes/statusWebhook
+   * pro Hostname-Eintrag in printers-config.js, unabhängig davon wie viele
+   * `labels{}`-Routen er hat). Normalfall: genau ein Eintrag.
+   */
+  printers: PrinterPollerPrinter[];
   client: CheckinBackendClient;
   pipeline: PrinterPollerPipeline;
   adapters: PrinterPollerAdapters;
@@ -46,7 +54,8 @@ export interface PrinterPollerDeps {
 type Mode = 'sleeping' | 'idle' | 'active';
 
 /**
- * Ein Poller pro konfiguriertem Drucker — Zeitfenster-gesteuertes adaptives
+ * Ein Poller pro Hostname-Gruppe (i.d.R. ein physischer Drucker, optional
+ * mehrere — siehe `PrinterPollerDeps.printers`) — Zeitfenster-gesteuertes adaptives
  * Polling gegen ChurchTools, MAX_ERRORS-Cooldown mit isolierter
  * Auto-Recovery (ein instabiler Drucker legt keine anderen lahm, siehe v1
  * Issue #21), Aktivierung/Abmeldung an Fensterrändern. Ersetzt v1s
@@ -65,6 +74,10 @@ export class PrinterPoller {
 
   constructor(private readonly deps: PrinterPollerDeps) {}
 
+  private get primary(): PrinterPollerPrinter {
+    return this.deps.printers[0]!;
+  }
+
   start(): void {
     if (this.running) return;
     this.running = true;
@@ -77,12 +90,19 @@ export class PrinterPoller {
     this.timer = null;
   }
 
-  status(): { printerId: number; running: boolean; mode: Mode; consecutiveErrors: number; lastJobAt: number | null } {
-    return { printerId: this.deps.printer.id, running: this.running, mode: this.currentMode(), consecutiveErrors: this.consecutiveErrors, lastJobAt: this.lastJobAt };
+  status(): { printerId: number; printerIds: number[]; running: boolean; mode: Mode; consecutiveErrors: number; lastJobAt: number | null } {
+    return {
+      printerId: this.primary.id,
+      printerIds: this.deps.printers.map((p) => p.id),
+      running: this.running,
+      mode: this.currentMode(),
+      consecutiveErrors: this.consecutiveErrors,
+      lastJobAt: this.lastJobAt,
+    };
   }
 
   private get schedule() {
-    return resolvePrinterSchedule(this.deps.printer, this.deps.config.activeTimesDefault);
+    return resolvePrinterSchedule(this.primary, this.deps.config.activeTimesDefault);
   }
 
   private currentMode(): Mode {
@@ -128,7 +148,7 @@ export class PrinterPoller {
     const interval = mode === 'active' ? this.deps.config.pollActiveMs : this.deps.config.pollIdleMs;
 
     try {
-      const result = await this.deps.client.getNextPrinterJob(this.deps.printer.hostname);
+      const result = await this.deps.client.getNextPrinterJob(this.primary.hostname);
       if (!result.success) throw new Error(result.message ?? 'API-Fehler');
 
       if (!result.data || !result.data.trim()) {
@@ -137,7 +157,7 @@ export class PrinterPoller {
         return;
       }
 
-      await this.deps.pipeline.processIncomingJob(this.deps.printer.id, result.data);
+      await this.deps.pipeline.processIncomingJob(this.primary.hostname, result.data);
       this.consecutiveErrors = 0;
       this.lastJobAt = Date.now();
       this.scheduleNext(200);
@@ -149,11 +169,11 @@ export class PrinterPoller {
   private async handlePollError(err: unknown): Promise<void> {
     this.consecutiveErrors++;
     const message = err instanceof Error ? err.message : String(err);
-    this.deps.logger?.error(`[${this.deps.printer.hostname}] Poll-Fehler #${this.consecutiveErrors}: ${message}`);
+    this.deps.logger?.error(`[${this.primary.hostname}] Poll-Fehler #${this.consecutiveErrors}: ${message}`);
 
     if (this.consecutiveErrors >= this.deps.config.maxErrors) {
       try {
-        await this.deps.client.hidePrinter(this.deps.printer.hostname);
+        await this.deps.client.hidePrinter(this.primary.hostname);
       } catch {
         // Best effort — der Poller pausiert ohnehin gleich für einen Cooldown.
       }
@@ -173,34 +193,39 @@ export class PrinterPoller {
   }
 
   /**
-   * Prüft (falls `checkEnabled`) einmalig den Druckerstatus und meldet bei
-   * ChurchTools an. Vereinfachung gegenüber v1s `waitForPrinterReady`, das
-   * blockierend in einer Schleife auf Bereitschaft wartete — hier wird bei
-   * Nichtbereitschaft nur gewarnt (Status-Webhook) und trotzdem angemeldet;
-   * der eigentliche Druck-Bereitschaftscheck passiert ohnehin pro Etikett
-   * in `PrintPipeline` samt Retry-Queue, ein zusätzlicher Blockierzustand
-   * beim Fensteröffnen brächte keinen Korrektheitsgewinn mehr.
+   * Prüft (falls `checkEnabled`) einmalig den Status ALLER physischen Beine
+   * dieser Hostname-Gruppe und meldet danach EINMAL bei ChurchTools an (v1
+   * Routing-Modus: `checkAllPrinters`/`getUniqueHosts` in label-router.js —
+   * ein instabiles Bein blockiert die Anmeldung nicht, es wird nur wie in v1
+   * ein Status-Webhook pro betroffenem Bein verschickt). Vereinfachung
+   * gegenüber v1s `waitForPrinterReady`, das blockierend in einer Schleife
+   * auf Bereitschaft wartete — hier wird bei Nichtbereitschaft nur gewarnt
+   * und trotzdem angemeldet; der eigentliche Druck-Bereitschaftscheck
+   * passiert ohnehin pro Etikett in `PrintPipeline` samt Retry-Queue.
    */
   private async activateWithCheck(): Promise<void> {
-    const printer = this.deps.printer;
-    if (printer.checkEnabled) {
-      try {
-        const adapter = await this.deps.adapters.getAdapter(printer);
-        const status = await adapter.getStatus();
-        if (status.status !== PrinterStatus.ONLINE) {
-          await this.dispatchStatusEvent('printer.warning', status);
-        }
-      } catch (err) {
-        this.deps.logger?.warn(`[${printer.hostname}] Statusprüfung fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    if (this.primary.checkEnabled) {
+      await Promise.all(
+        this.deps.printers.map(async (leg) => {
+          try {
+            const adapter = await this.deps.adapters.getAdapter(leg);
+            const status = await adapter.getStatus();
+            if (status.status !== PrinterStatus.ONLINE) {
+              await this.dispatchStatusEvent('printer.warning', status, leg);
+            }
+          } catch (err) {
+            this.deps.logger?.warn(`[${leg.hostname}] Statusprüfung fehlgeschlagen (${leg.host}:${leg.port}): ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }),
+      );
     }
 
-    const result = await this.deps.client.activatePrinter(printer.hostname, printer.name);
-    if (!result.success) this.deps.logger?.error(`[${printer.hostname}] Anmeldung fehlgeschlagen: ${result.message}`);
+    const result = await this.deps.client.activatePrinter(this.primary.hostname, this.primary.name);
+    if (!result.success) this.deps.logger?.error(`[${this.primary.hostname}] Anmeldung fehlgeschlagen: ${result.message}`);
   }
 
   private async onModeChange(prevMode: Mode | null, newMode: Mode): Promise<void> {
-    const printer = this.deps.printer;
+    const printer = this.primary;
 
     if (prevMode === 'sleeping' && newMode !== 'sleeping') {
       this.windowOpenedAt = Date.now();
@@ -218,9 +243,10 @@ export class PrinterPoller {
     }
   }
 
-  private async dispatchStatusEvent(event: string, status: Parameters<typeof buildStatusWebhookPayload>[2]): Promise<void> {
-    if (!this.deps.printer.statusWebhookEnabled) return;
-    const payload = buildStatusWebhookPayload(event, { hostname: this.deps.printer.hostname, name: this.deps.printer.name, host: this.deps.printer.host, port: this.deps.printer.port }, status);
+  /** `leg` identifiziert, welches physische Gerät betroffen ist (siehe v1: `printerHost`/`printerPort` im Status-Payload zeigen den konkreten Routing-Host, nicht den Hostnamen); `statusWebhookEnabled` gilt gruppenweit über `primary`. */
+  private async dispatchStatusEvent(event: string, status: Parameters<typeof buildStatusWebhookPayload>[2], leg: PrinterPollerPrinter = this.primary): Promise<void> {
+    if (!this.primary.statusWebhookEnabled) return;
+    const payload = buildStatusWebhookPayload(event, { hostname: this.primary.hostname, name: this.primary.name, host: leg.host, port: leg.port }, status);
     await dispatchOutgoingWebhooks(this.deps.db, this.deps.env, 'status', payload);
   }
 }

@@ -48,6 +48,20 @@ describe('PrintOrchestrator', () => {
     await orchestrator.stop();
   });
 
+  it('starts exactly ONE poller for a hostname shared by two physical printers (virtueller Drucker, siehe v1 Routing-Modus) — never one per row', async () => {
+    db.insert(churchtoolsConnection).values({ baseUrl: 'https://example.church.tools', username: 'bot', passwordEnc: encryptSecret('secret', env.ENCRYPTION_KEY) }).run();
+    db.insert(printers).values({ name: 'Kind', hostname: 'B2', vendor: 'brother-ql', host: '10.0.0.1' }).run();
+    db.insert(printers).values({ name: 'Eltern', hostname: 'B2', vendor: 'zebra-zpl', host: '10.0.0.2' }).run();
+    const orchestrator = new PrintOrchestrator({ db, env });
+
+    await orchestrator.start();
+
+    // Zwei Zeilen, ein Hostname -> ein Poller, sonst würde derselbe
+    // Check-in doppelt bei ChurchTools abgeholt und verarbeitet.
+    expect(orchestrator.status().pollers).toHaveLength(1);
+    await orchestrator.stop();
+  });
+
   it('returns "unknown printer" for handleIncomingJob when the hostname does not match any printer', async () => {
     const orchestrator = new PrintOrchestrator({ db, env });
     await orchestrator.start();

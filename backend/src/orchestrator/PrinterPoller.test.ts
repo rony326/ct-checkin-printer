@@ -60,7 +60,7 @@ afterEach(() => {
 describe('PrinterPoller idle polling', () => {
   it('polls immediately on start and again after the idle interval when there is no job', async () => {
     const client = fakeClient();
-    const poller = new PrinterPoller({ db, env, printer: BASE_PRINTER, client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+    const poller = new PrinterPoller({ db, env, printers: [BASE_PRINTER], client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
 
     poller.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -74,7 +74,7 @@ describe('PrinterPoller idle polling', () => {
 
   it('stops polling once stopped', async () => {
     const client = fakeClient();
-    const poller = new PrinterPoller({ db, env, printer: BASE_PRINTER, client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+    const poller = new PrinterPoller({ db, env, printers: [BASE_PRINTER], client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
 
     poller.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -89,11 +89,11 @@ describe('PrinterPoller job handling', () => {
   it('hands received job data to the pipeline and switches to the fast active cadence', async () => {
     const client = fakeClient({ getNextPrinterJob: vi.fn(async () => ({ success: true, data: 'name=Max\nid=1\ncode=AB\ntype=parent' })) });
     const pipeline = fakePipeline();
-    const poller = new PrinterPoller({ db, env, printer: BASE_PRINTER, client, pipeline, adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+    const poller = new PrinterPoller({ db, env, printers: [BASE_PRINTER], client, pipeline, adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
 
     poller.start();
     await vi.advanceTimersByTimeAsync(0);
-    expect(pipeline.processIncomingJob).toHaveBeenCalledWith(BASE_PRINTER.id, 'name=Max\nid=1\ncode=AB\ntype=parent');
+    expect(pipeline.processIncomingJob).toHaveBeenCalledWith(BASE_PRINTER.hostname, 'name=Max\nid=1\ncode=AB\ntype=parent');
 
     // Nächster Poll ist der kurze 200ms-Folgepoll nach einem Job, nicht das volle Idle-Intervall.
     client.getNextPrinterJob.mockResolvedValue({ success: true, data: null });
@@ -106,7 +106,7 @@ describe('PrinterPoller job handling', () => {
   it('treats empty/whitespace job data as "no job"', async () => {
     const client = fakeClient({ getNextPrinterJob: vi.fn(async () => ({ success: true, data: '   ' })) });
     const pipeline = fakePipeline();
-    const poller = new PrinterPoller({ db, env, printer: BASE_PRINTER, client, pipeline, adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+    const poller = new PrinterPoller({ db, env, printers: [BASE_PRINTER], client, pipeline, adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
 
     poller.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -119,7 +119,7 @@ describe('PrinterPoller job handling', () => {
 describe('PrinterPoller error handling', () => {
   it('backs off exponentially on consecutive API errors', async () => {
     const client = fakeClient({ getNextPrinterJob: vi.fn(async () => ({ success: false, message: 'CT down' })) });
-    const poller = new PrinterPoller({ db, env, printer: BASE_PRINTER, client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+    const poller = new PrinterPoller({ db, env, printers: [BASE_PRINTER], client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
 
     poller.start();
     await vi.advanceTimersByTimeAsync(0); // Fehler #1, Backoff = idleMs
@@ -140,7 +140,7 @@ describe('PrinterPoller error handling', () => {
   it('hides the printer and pauses for a cooldown once MAX_ERRORS is reached, then reactivates', async () => {
     const client = fakeClient({ getNextPrinterJob: vi.fn(async () => ({ success: false, message: 'CT down' })) });
     const config = { ...DEFAULT_APP_CONFIG, maxErrors: 2, pollIdleMs: 1000, pollerRestartDelayMs: 5000 };
-    const poller = new PrinterPoller({ db, env, printer: BASE_PRINTER, client, pipeline: fakePipeline(), adapters: fakeAdapters(), config });
+    const poller = new PrinterPoller({ db, env, printers: [BASE_PRINTER], client, pipeline: fakePipeline(), adapters: fakeAdapters(), config });
 
     poller.start();
     await vi.advanceTimersByTimeAsync(0); // Fehler #1
@@ -162,7 +162,7 @@ describe('PrinterPoller time-window transitions', () => {
 
   it('stays sleeping and does not call ChurchTools before the window opens', async () => {
     const client = fakeClient();
-    const poller = new PrinterPoller({ db, env, printer: custom, client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+    const poller = new PrinterPoller({ db, env, printers: [custom], client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
 
     poller.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -175,7 +175,7 @@ describe('PrinterPoller time-window transitions', () => {
 
   it('logs in and activates the printer once the window opens, then hides it and closes the window when it ends', async () => {
     const client = fakeClient();
-    const poller = new PrinterPoller({ db, env, printer: custom, client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+    const poller = new PrinterPoller({ db, env, printers: [custom], client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
 
     poller.start();
     await vi.advanceTimersByTimeAsync(0); // 10:00, noch ausserhalb -> sleeping
@@ -198,7 +198,7 @@ describe('PrinterPoller time-window transitions', () => {
   it('invokes the onWindowClosed hook when the window ends', async () => {
     const client = fakeClient();
     const onWindowClosed = vi.fn();
-    const poller = new PrinterPoller({ db, env, printer: custom, client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG, onWindowClosed });
+    const poller = new PrinterPoller({ db, env, printers: [custom], client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG, onWindowClosed });
 
     poller.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -210,6 +210,67 @@ describe('PrinterPoller time-window transitions', () => {
     expect(onWindowClosed).toHaveBeenCalledWith(custom.id, expect.any(Number), expect.any(Number));
     const [, windowOpenedAt, windowClosedAt] = onWindowClosed.mock.calls[0]!;
     expect(windowOpenedAt).toBeLessThanOrEqual(windowClosedAt);
+
+    poller.stop();
+  });
+});
+
+describe('PrinterPoller multi-leg groups (virtueller Drucker mit mehreren physischen Beinen, siehe v1 Routing-Modus)', () => {
+  const legPrimary: PrinterPollerPrinter = {
+    ...BASE_PRINTER,
+    id: 20,
+    name: 'Kind',
+    host: '10.0.0.20',
+    activeTimesMode: 'custom',
+    activeTimesExpr: 'Mo:10:05-10:10',
+    checkEnabled: true,
+  };
+  const legSecondary: PrinterPollerPrinter = { ...BASE_PRINTER, id: 21, name: 'Eltern', host: '10.0.0.21' };
+
+  it('checks every physical leg before the single ChurchTools activation for the shared hostname', async () => {
+    const client = fakeClient();
+    const statusByLeg = new Map([
+      [legPrimary.id, PrinterStatus.ONLINE],
+      [legSecondary.id, PrinterStatus.PAPER_EMPTY],
+    ]);
+    const getAdapter = vi.fn(async (p: PrinterPollerPrinter) => ({
+      getStatus: vi.fn(async () => ({ status: statusByLeg.get(p.id)!, humanMessage: 'x', source: 'print-channel' as const, timestamp: new Date() })),
+    })) as unknown as (p: PrinterPollerPrinter) => Promise<LabelPrinterAdapter>;
+    const poller = new PrinterPoller({
+      db,
+      env,
+      printers: [legPrimary, legSecondary],
+      client,
+      pipeline: fakePipeline(),
+      adapters: { getAdapter },
+      config: DEFAULT_APP_CONFIG,
+    });
+
+    poller.start();
+    await vi.advanceTimersByTimeAsync(0); // 10:00, ausserhalb Zeitfenster -> sleeping
+    vi.setSystemTime(new Date('2026-01-05T10:05:30'));
+    await vi.advanceTimersByTimeAsync(30_000); // Fenster öffnet -> Check + Anmeldung
+
+    expect(getAdapter).toHaveBeenCalledWith(legPrimary);
+    expect(getAdapter).toHaveBeenCalledWith(legSecondary);
+    // NUR eine Anmeldung für die ganze Gruppe, mit Hostname+Name des primären Beins —
+    // ein instabiles zweites Bein darf den anderen Check-in-Typ nicht blockieren.
+    expect(client.activatePrinter).toHaveBeenCalledTimes(1);
+    expect(client.activatePrinter).toHaveBeenCalledWith(legPrimary.hostname, legPrimary.name);
+
+    poller.stop();
+  });
+
+  it('polls ChurchTools and dispatches incoming jobs using the shared hostname, not any single leg`s id', async () => {
+    const client = fakeClient({ getNextPrinterJob: vi.fn(async () => ({ success: true, data: 'name=Max\nid=1\ncode=AB\ntype=parent' })) });
+    const pipeline = fakePipeline();
+    const poller = new PrinterPoller({ db, env, printers: [legPrimary, legSecondary], client, pipeline, adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+
+    poller.start();
+    vi.setSystemTime(new Date('2026-01-05T10:05:30'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(pipeline.processIncomingJob).toHaveBeenCalledWith(legPrimary.hostname, 'name=Max\nid=1\ncode=AB\ntype=parent');
 
     poller.stop();
   });

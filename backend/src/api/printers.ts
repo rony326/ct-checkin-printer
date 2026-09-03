@@ -58,9 +58,9 @@ export async function registerPrinterRoutes(app: FastifyInstance) {
     const scheduleError = validateActiveTimes(parsed.data.activeTimesMode, parsed.data.activeTimesExpr);
     if (scheduleError) return reply.code(400).send({ error: scheduleError });
 
-    const existing = app.db.select().from(printers).where(eq(printers.hostname, parsed.data.hostname)).get();
-    if (existing) return reply.code(400).send({ error: `Hostname „${parsed.data.hostname}" wird bereits verwendet` });
-
+    // Mehrere Drucker dürfen denselben Hostnamen teilen — das bildet einen
+    // "virtuellen Drucker" mit mehreren physischen Beinen ab, siehe
+    // db/schema.ts (printers.hostname) und orchestrator/routing.ts.
     const [row] = app.db.insert(printers).values(parsed.data).returning().all();
     await app.orchestrator.reload();
     return reply.code(201).send(row);
@@ -76,11 +76,6 @@ export async function registerPrinterRoutes(app: FastifyInstance) {
 
     const scheduleError = validateActiveTimes(parsed.data.activeTimesMode ?? existing.activeTimesMode, parsed.data.activeTimesExpr ?? existing.activeTimesExpr ?? undefined);
     if (scheduleError) return reply.code(400).send({ error: scheduleError });
-
-    if (parsed.data.hostname && parsed.data.hostname !== existing.hostname) {
-      const conflict = app.db.select().from(printers).where(eq(printers.hostname, parsed.data.hostname)).get();
-      if (conflict) return reply.code(400).send({ error: `Hostname „${parsed.data.hostname}" wird bereits verwendet` });
-    }
 
     app.db
       .update(printers)
