@@ -1,8 +1,10 @@
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-  });
+  // Content-Type nur setzen wenn tatsächlich ein Body gesendet wird — Fastifys
+  // Default-JSON-Parser lehnt sonst jede Anfrage mit leerem Body ab
+  // (FST_ERR_CTP_EMPTY_JSON_BODY), was bislang JEDES DELETE (und jedes
+  // body-lose POST, z.B. "Test senden") im Browser scheitern liess.
+  const headers = options.body !== undefined ? { 'Content-Type': 'application/json', ...options.headers } : options.headers;
+  const res = await fetch(path, { ...options, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { error?: string });
     throw new Error(body.error || `Anfrage fehlgeschlagen (${res.status})`);
