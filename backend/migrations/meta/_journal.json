@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1788424818917,
+      "tag": "0000_silent_blizzard",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788428727249,
+      "tag": "0001_perpetual_pete_wisdom",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788429224209,
+      "tag": "0002_plain_shocker",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788444537258,
+      "tag": "0003_abandoned_blonde_phantom",
+      "breakpoints": true
+    }
+  ]
+}

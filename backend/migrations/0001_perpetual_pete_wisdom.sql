@@ -1,0 +1,1 @@
+ALTER TABLE `churchtools_connection` ADD `person_id` integer;

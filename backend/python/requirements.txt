@@ -1,0 +1,8 @@
+# Nur für den Brother-Raster-Helper (brother_raster_helper.py) — v2 rendert
+# selbst nicht mehr in Python, siehe Plan Abschnitt "Bewusste Technik-Entscheidung".
+#
+# brother_ql-inventree statt Original-brother_ql (bessere QL-820NWB-
+# Unterstützung, natives 60x86/DK-11234-Label) — beide belegen denselben
+# Modulnamen "brother_ql", nicht parallel installieren (siehe Repo-Root-README).
+brother_ql-inventree
+pillow

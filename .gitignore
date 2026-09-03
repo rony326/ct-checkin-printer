@@ -1,19 +1,13 @@
-# Dependencies
 node_modules/
-
-# Environment
+dist/
+data/
 .env
-
-# Dry-Run Vorschauen
-label_preview_*.png
-
-# Job-Dumps (Diagnose-Script)
-job-dump.json
-
-# Logfiles
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+*.tsbuildinfo
 logs/
 *.log
-
-# OS
-.DS_Store
-Thumbs.db

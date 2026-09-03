@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    ports:
+      - '3000:3000'
+    environment:
+      DB_PATH: /data/app.db
+      APP_PORT: 3000
+      APP_HOST: 0.0.0.0
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY fehlt — siehe .env.example}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET fehlt — siehe .env.example}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      # SQLite-Datei + Font-/Logo-Uploads liegen beide unter diesem einen
+      # Verzeichnis (siehe storage/uploadsDir.ts: <DB_PATH-Verzeichnis>/uploads/),
+      # ein Volume sichert also beides gemeinsam (siehe Plan, "Deployment").
+      - data:/data
+    restart: unless-stopped
+
+volumes:
+  data:
