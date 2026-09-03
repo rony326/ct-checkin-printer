@@ -6,7 +6,9 @@ import Fastify from 'fastify';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { registerAuthRoutes } from '../auth/routes.js';
+import { registerAppConfigRoutes } from './appConfig.js';
 import { registerChurchToolsConnectionRoutes } from './churchToolsConnection.js';
+import { registerDashboardRoutes } from './dashboard.js';
 import { registerDocumentPrinterRoutes } from './documentPrinters.js';
 import { registerFontRoutes } from './fonts.js';
 import { registerLabelLayoutRoutes } from './labelLayouts.js';
@@ -58,6 +60,8 @@ export async function buildServer(db: Db, env: Env, orchestrator: OrchestratorLi
   await registerWebhookIncomingRoutes(app);
   await registerDocumentPrinterRoutes(app);
   await registerSummaryLayoutRoutes(app);
+  await registerDashboardRoutes(app);
+  await registerAppConfigRoutes(app);
 
   app.get('/api/health', async () => ({ ok: true }));
 

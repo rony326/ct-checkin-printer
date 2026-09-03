@@ -55,6 +55,11 @@ siehe [Bekannte Lücken](#bekannte-lücken).
   Self-Checkin-Kiosk, unabhängig von ChurchTools).
 - **Ein einzelner Admin-Login** fürs Web-GUI, passend zum Betriebsmodell
   (ein Gerät pro Gemeinde, lokal gehostet).
+- **Live-Status-Dashboard** (Startseite): Modus/Fehler/letzter Job/Warteschlange
+  je Drucker, alle 5s aktualisiert.
+- **Globale Einstellungen** im GUI (`/settings`): Polling-Intervalle,
+  Fehler-Schwelle, Retry-Queue-Defaults und globales Zeitfenster — wirkt
+  sofort, ohne Neustart.
 
 ## Schnellstart (Docker)
 
@@ -209,11 +214,6 @@ werden.
   Hardware**, da keine zur Verfügung stand.
 - **`verify_against_ct`** (Sammelausdruck-Absicherung gegen ChurchTools'
   eigene Checkin-Liste) ist nicht implementiert, siehe oben.
-- **Kein `/api/dashboard`**-Endpunkt/Live-Status-UI — `PrintOrchestrator.status()`
-  existiert serverseitig, ist aber noch nicht ans GUI angebunden.
-- **Kein globaler `app_config`-GUI-Screen** — Polling-Intervalle/Defaults
-  (`poll_idle_ms` etc.) sind nur direkt in der DB änderbar, fallen sonst auf
-  v1-kompatible Standardwerte zurück.
 - **Editor nicht per Playwright/E2E abgesichert** — Drag/Drop, Vorschau und
   Speichern wurden manuell verifiziert, es existiert keine automatisierte
   Browser-Testsuite.

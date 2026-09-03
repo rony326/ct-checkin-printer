@@ -125,3 +125,33 @@ export interface DocumentPrinter {
   port: number;
   ippQueue: string;
 }
+
+export type PollerMode = 'sleeping' | 'idle' | 'active';
+
+export interface DashboardPrinterStatus {
+  printerId: number;
+  hostname: string;
+  name: string;
+  running: boolean;
+  mode: PollerMode;
+  consecutiveErrors: number;
+  lastJobAt: number | null;
+  pendingQueueCount: number;
+}
+
+export interface DashboardResponse {
+  pollers: DashboardPrinterStatus[];
+}
+
+export interface AppConfigValues {
+  pollIdleMs: number;
+  pollActiveMs: number;
+  pollActiveTtlMs: number;
+  maxErrors: number;
+  pollerRestartDelayMs: number;
+  printerTimeoutMs: number;
+  activeTimesDefault: string | null;
+  queueRetryMs: number;
+  queueMaxRetries: number;
+  queueMaxAgeMs: number;
+}

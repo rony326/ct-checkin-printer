@@ -1,11 +1,13 @@
 import { NavLink, Outlet } from 'react-router-dom';
 
 const NAV_ITEMS = [
+  { to: '/', label: 'Status', end: true },
   { to: '/layouts', label: 'Etiketten-Layouts' },
   { to: '/printers', label: 'Drucker' },
   { to: '/churchtools', label: 'ChurchTools' },
   { to: '/webhooks', label: 'Webhooks' },
   { to: '/document-printers', label: 'Sammelausdruck-Drucker' },
+  { to: '/settings', label: 'Einstellungen' },
 ];
 
 export function NavShell() {
@@ -26,6 +28,7 @@ export function NavShell() {
             <NavLink
               key={item.to}
               to={item.to}
+              end={item.end}
               style={({ isActive }) => ({
                 padding: '0.5rem 0.6rem',
                 borderRadius: 4,

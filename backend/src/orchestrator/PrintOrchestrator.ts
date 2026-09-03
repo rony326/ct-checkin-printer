@@ -9,6 +9,7 @@ import { AdapterRegistry } from './adapterRegistry.js';
 import { loadAppConfig } from './appConfig.js';
 import { DocumentAdapterRegistry } from './documentAdapterRegistry.js';
 import { PrintPipeline } from './PrintPipeline.js';
+import type { OrchestratorStatus } from './orchestratorLike.js';
 import { PrinterPoller, type PrinterPollerPrinter } from './PrinterPoller.js';
 import { QueueMonitor } from './QueueMonitor.js';
 import { SummaryReportService, type GenerateSummaryResult } from './SummaryReportService.js';
@@ -21,9 +22,7 @@ export interface PrintOrchestratorDeps {
   summaryReportService?: SummaryReportService;
 }
 
-export interface PrintOrchestratorStatus {
-  pollers: ReturnType<PrinterPoller['status']>[];
-}
+export type PrintOrchestratorStatus = OrchestratorStatus;
 
 function toPollerPrinter(row: typeof printers.$inferSelect): PrinterPollerPrinter {
   return {

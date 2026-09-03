@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router-dom';
 import { NavShell } from './components/NavShell.js';
 import { Login } from './pages/Login.js';
+import { Dashboard } from './pages/Dashboard.js';
 import { LayoutList } from './pages/LayoutList.js';
 import { LayoutEditor } from './pages/LayoutEditor.js';
 import { PrinterList } from './pages/PrinterList.js';
@@ -9,6 +10,7 @@ import { PrinterDetail } from './pages/PrinterDetail.js';
 import { ChurchToolsSettings } from './pages/ChurchToolsSettings.js';
 import { Webhooks } from './pages/Webhooks.js';
 import { DocumentPrinters } from './pages/DocumentPrinters.js';
+import { AppConfigSettings } from './pages/AppConfigSettings.js';
 
 type AuthStatus = { setupRequired: boolean; authenticated: boolean };
 
@@ -31,7 +33,7 @@ export function App() {
   return (
     <Routes>
       <Route element={<NavShell />}>
-        <Route path="/" element={<Navigate to="/layouts" replace />} />
+        <Route path="/" element={<Dashboard />} />
         <Route path="/layouts" element={<LayoutList />} />
         <Route path="/layouts/:id" element={<LayoutEditor />} />
         <Route path="/printers" element={<PrinterList />} />
@@ -39,6 +41,7 @@ export function App() {
         <Route path="/churchtools" element={<ChurchToolsSettings />} />
         <Route path="/webhooks" element={<Webhooks />} />
         <Route path="/document-printers" element={<DocumentPrinters />} />
+        <Route path="/settings" element={<AppConfigSettings />} />
       </Route>
     </Routes>
   );
