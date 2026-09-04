@@ -70,7 +70,7 @@ export function Dashboard() {
             </thead>
             <tbody>
               {pollers.map((p) => (
-                <tr key={p.printerId}>
+                <tr key={p.groupId}>
                   <td>{p.name}</td>
                   <td className="mono">{p.hostname}</td>
                   <td>

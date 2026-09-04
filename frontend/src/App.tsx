@@ -6,6 +6,7 @@ import { Dashboard } from './pages/Dashboard.js';
 import { LayoutList } from './pages/LayoutList.js';
 import { LayoutEditor } from './pages/LayoutEditor.js';
 import { PrinterList } from './pages/PrinterList.js';
+import { PrinterCreate } from './pages/PrinterCreate.js';
 import { PrinterDetail } from './pages/PrinterDetail.js';
 import { ChurchToolsSettings } from './pages/ChurchToolsSettings.js';
 import { Webhooks } from './pages/Webhooks.js';
@@ -37,6 +38,7 @@ export function App() {
         <Route path="/layouts" element={<LayoutList />} />
         <Route path="/layouts/:id" element={<LayoutEditor />} />
         <Route path="/printers" element={<PrinterList />} />
+        <Route path="/printers/new" element={<PrinterCreate />} />
         <Route path="/printers/:id" element={<PrinterDetail />} />
         <Route path="/churchtools" element={<ChurchToolsSettings />} />
         <Route path="/webhooks" element={<Webhooks />} />

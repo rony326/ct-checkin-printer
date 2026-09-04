@@ -44,6 +44,13 @@ siehe [Bekannte Lücken](#bekannte-lücken).
 - **`also[]`-Routing**: ein Check-in kann zusätzliche Etiketten auf einem
   *anderen* Drucker auslösen (z.B. Eltern- und Kinder-Etikett auf getrennten
   Geräten).
+- **Router-Drucker**: eine Druckergruppe kann mehrere physische Geräte
+  (unterschiedlicher Hersteller möglich) unter einem gemeinsamen `hostname`
+  bündeln; welches Bein einen Check-in bekommt, entscheidet der pro Etikett
+  zugewiesene Ziel-Drucker im Layout. Unterschied zu `also[]`: `also[]` druckt
+  *zusätzlich* auf einem weiteren Drucker, ein Router-Drucker druckt
+  *alternativ* je Check-in-Typ auf dem jeweils passenden Bein — nach außen
+  bleibt es für ChurchTools ein einziger Check-in-Drucker.
 - **DB-persistente Retry-Queue**: nicht zustellbare Etiketten überleben einen
   Neustart und werden automatisch nachgedruckt, sobald der Zieldrucker wieder
   bereit ist.
@@ -127,15 +134,19 @@ danach über das Web-GUI verwaltet:
 2. **ChurchTools-Verbindung**: Basis-URL, Benutzername, Passwort eines Bots/
    Service-Users mit Check-in-/Drucker-Berechtigung. Der Verbindungstest prüft
    den Login sofort.
-3. **Drucker anlegen**: Name, `hostname` (der CT-„Ort", identisch zu dem in
-   ChurchTools hinterlegten Check-in-Drucker), Hersteller (Brother/Zebra),
-   IP/Port, Medientyp, Zeitfenster-Modus (`inherit`/`always`/`custom`).
-   Änderungen wirken **sofort**, ohne Neustart — der Orchestrator lädt sich
-   nach jeder Drucker-/ChurchTools-Änderung automatisch neu.
+3. **Drucker anlegen**: im Anlege-Assistenten zunächst zwischen **Einzel-
+   Drucker** (ein physisches Gerät) und **Router-Drucker** (mehrere physische
+   Geräte, ggf. unterschiedlicher Hersteller, unter einem gemeinsamen
+   `hostname` — der CT-„Ort", identisch zu dem in ChurchTools hinterlegten
+   Check-in-Drucker) wählen. Je Gerät/Bein: Name, Hersteller (Brother/Zebra),
+   IP/Port, Medientyp. Zeitfenster-Modus (`inherit`/`always`/`custom`) gilt pro
+   Gruppe. Änderungen wirken **sofort**, ohne Neustart — der Orchestrator lädt
+   sich nach jeder Drucker-/ChurchTools-Änderung automatisch neu.
 4. **Etiketten-Layout(s)**: im visuellen Editor pro Etikettentyp (`ct_type_key`,
    z.B. `parent`/`child`) Text-/QR-/Logo-/Linien-Elemente platzieren, Medium
-   und Ziel-Drucker zuweisen, optional `also[]` für ein zusätzliches Etikett
-   auf einem anderen Drucker.
+   und Ziel-Drucker zuweisen — bei einem Router-Drucker das jeweilige Bein, um
+   Check-in-Typen auf unterschiedliche physische Geräte zu verteilen, optional
+   zusätzlich `also[]` für ein weiteres Etikett auf einem anderen Drucker.
 5. **Webhooks/Sammelausdruck** (optional): siehe unten.
 
 ## Zeitfenster (`activeTimes`)
