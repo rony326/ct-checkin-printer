@@ -1,8 +1,8 @@
-import { eq } from 'drizzle-orm';
+import { eq, asc } from 'drizzle-orm';
 import { ChurchToolsOldApiClient } from '../adapters/churchtools/ChurchToolsOldApiClient.js';
 import type { CheckinBackendClient } from '../adapters/churchtools/types.js';
 import type { Db } from '../db/client.js';
-import { churchtoolsConnection, printers, summaryLayouts } from '../db/schema.js';
+import { churchtoolsConnection, printerGroups, printers, summaryLayouts } from '../db/schema.js';
 import { decryptSecret, encryptSecret } from '../crypto/secrets.js';
 import type { Env } from '../env.js';
 import { AdapterRegistry } from './adapterRegistry.js';
@@ -10,7 +10,7 @@ import { loadAppConfig } from './appConfig.js';
 import { DocumentAdapterRegistry } from './documentAdapterRegistry.js';
 import { PrintPipeline } from './PrintPipeline.js';
 import type { OrchestratorStatus } from './orchestratorLike.js';
-import { PrinterPoller, type PrinterPollerPrinter } from './PrinterPoller.js';
+import { PrinterPoller, type PrinterPollerGroup, type PrinterPollerLeg } from './PrinterPoller.js';
 import { QueueMonitor } from './QueueMonitor.js';
 import { SummaryReportService, type GenerateSummaryResult } from './SummaryReportService.js';
 
@@ -24,14 +24,11 @@ export interface PrintOrchestratorDeps {
 
 export type PrintOrchestratorStatus = OrchestratorStatus;
 
-function toPollerPrinter(row: typeof printers.$inferSelect): PrinterPollerPrinter {
+function toPollerGroup(row: typeof printerGroups.$inferSelect): PrinterPollerGroup {
   return {
     id: row.id,
     hostname: row.hostname,
     name: row.name,
-    vendor: row.vendor,
-    host: row.host,
-    port: row.port,
     checkEnabled: row.checkEnabled,
     activeTimesMode: row.activeTimesMode,
     activeTimesExpr: row.activeTimesExpr,
@@ -39,10 +36,13 @@ function toPollerPrinter(row: typeof printers.$inferSelect): PrinterPollerPrinte
   };
 }
 
+function toPollerLeg(row: typeof printers.$inferSelect): PrinterPollerLeg {
+  return { id: row.id, name: row.name, vendor: row.vendor, host: row.host, port: row.port };
+}
+
 /**
  * Bauschritt 9: komponiert Adapter-Registry, Druck-Pipeline, einen
- * `PrinterPoller` je Hostnamen-Gruppe (siehe `printers.hostname`-Kommentar in
- * db/schema.ts) und einen druckerübergreifenden
+ * `PrinterPoller` je `printer_groups`-Zeile und einen druckerübergreifenden
  * `QueueMonitor` zu einem laufenden Dienst — ersetzt v1s `index.js`, das
  * dieselbe Verdrahtung prozedural für Einzel-/Routing-Modus getrennt
  * vornahm (siehe Plan, "PrintOrchestrator").
@@ -89,31 +89,20 @@ export class PrintOrchestrator {
       return;
     }
 
-    const printerRows = this.db.select().from(printers).all();
-    // Nach Hostname gruppieren, NICHT ein Poller je Zeile — mehrere Zeilen
-    // mit demselben Hostnamen sind physische Beine desselben ChurchTools-Orts
-    // (siehe db/schema.ts, routing.ts) und dürfen nicht doppelt bei
-    // ChurchTools pollen/anmelden, sonst würde derselbe Check-in doppelt
-    // verarbeitet.
-    const groupsByHostname = new Map<string, (typeof printerRows)[number][]>();
-    for (const row of printerRows) {
-      const group = groupsByHostname.get(row.hostname) ?? [];
-      group.push(row);
-      groupsByHostname.set(row.hostname, group);
-    }
-
-    this.pollers = [...groupsByHostname.values()].map((group) => {
-      const legs = [...group].sort((a, b) => a.id - b.id).map(toPollerPrinter);
+    const groupRows = this.db.select().from(printerGroups).all();
+    this.pollers = groupRows.map((groupRow) => {
+      const legRows = this.db.select().from(printers).where(eq(printers.groupId, groupRow.id)).orderBy(asc(printers.id)).all();
       const poller = new PrinterPoller({
         db: this.db,
         env: this.env,
-        printers: legs,
+        group: toPollerGroup(groupRow),
+        legs: legRows.map(toPollerLeg),
         client,
         pipeline,
         adapters,
         config,
         logger: this.logger,
-        onWindowClosed: (_printerId, windowOpenedAt, windowClosedAt) => {
+        onWindowClosed: (windowOpenedAt, windowClosedAt) => {
           void this.triggerWindowCloseSummaries(new Date(windowOpenedAt), new Date(windowClosedAt));
         },
       });
@@ -152,8 +141,8 @@ export class PrintOrchestrator {
   async handleIncomingJob(hostname: string, rawData: string): Promise<{ ok: boolean; message?: string; printed?: number; queued?: number }> {
     if (!this.pipeline) return { ok: false, message: 'Orchestrator läuft nicht' };
 
-    const printer = this.db.select().from(printers).where(eq(printers.hostname, hostname)).get();
-    if (!printer) return { ok: false, message: `Unbekannter Drucker-Hostname "${hostname}"` };
+    const group = this.db.select().from(printerGroups).where(eq(printerGroups.hostname, hostname)).get();
+    if (!group) return { ok: false, message: `Unbekannter Drucker-Hostname "${hostname}"` };
 
     const result = await this.pipeline.processIncomingJob(hostname, rawData);
     return { ok: true, printed: result.printed, queued: result.queued };

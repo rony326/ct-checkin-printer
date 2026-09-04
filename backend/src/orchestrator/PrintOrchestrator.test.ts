@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Db } from '../db/client.js';
 import type { Env } from '../env.js';
-import { churchtoolsConnection, printers, summaryLayouts } from '../db/schema.js';
+import { churchtoolsConnection, printerGroups, printers, summaryLayouts } from '../db/schema.js';
 import { encryptSecret } from '../crypto/secrets.js';
 import { PrintOrchestrator } from './PrintOrchestrator.js';
 import type { SummaryReportService } from './SummaryReportService.js';
@@ -9,6 +9,12 @@ import { createTestDb } from './testDb.js';
 
 function fakeSummaryReportService() {
   return { generate: vi.fn(async () => ({ ok: true, groupsPrinted: 1 })) } as unknown as SummaryReportService;
+}
+
+function makePrinterGroupWithLeg(hostname: string, vendor: 'brother-ql' | 'zebra-zpl' = 'brother-ql') {
+  const [group] = db.insert(printerGroups).values({ name: hostname, hostname }).returning().all();
+  const [leg] = db.insert(printers).values({ groupId: group!.id, name: hostname, vendor, host: '10.0.0.1' }).returning().all();
+  return { group: group!, leg: leg! };
 }
 
 let db: Db;
@@ -27,7 +33,7 @@ afterEach(() => {
 
 describe('PrintOrchestrator', () => {
   it('does not start any pollers when no ChurchTools connection is configured', async () => {
-    db.insert(printers).values({ name: 'B1', hostname: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).run();
+    makePrinterGroupWithLeg('B1');
     const orchestrator = new PrintOrchestrator({ db, env });
 
     await orchestrator.start();
@@ -38,8 +44,8 @@ describe('PrintOrchestrator', () => {
 
   it('starts one poller per configured printer once a ChurchTools connection exists', async () => {
     db.insert(churchtoolsConnection).values({ baseUrl: 'https://example.church.tools', username: 'bot', passwordEnc: encryptSecret('secret', env.ENCRYPTION_KEY) }).run();
-    db.insert(printers).values({ name: 'B1', hostname: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).run();
-    db.insert(printers).values({ name: 'B2', hostname: 'B2', vendor: 'zebra-zpl', host: '10.0.0.2' }).run();
+    makePrinterGroupWithLeg('B1');
+    makePrinterGroupWithLeg('B2', 'zebra-zpl');
     const orchestrator = new PrintOrchestrator({ db, env });
 
     await orchestrator.start();
@@ -48,16 +54,15 @@ describe('PrintOrchestrator', () => {
     await orchestrator.stop();
   });
 
-  it('starts exactly ONE poller for a hostname shared by two physical printers (virtueller Drucker, siehe v1 Routing-Modus) — never one per row', async () => {
+  it('starts exactly ONE poller for a group with two physical legs (virtueller Drucker, siehe v1 Routing-Modus) — never one per leg', async () => {
     db.insert(churchtoolsConnection).values({ baseUrl: 'https://example.church.tools', username: 'bot', passwordEnc: encryptSecret('secret', env.ENCRYPTION_KEY) }).run();
-    db.insert(printers).values({ name: 'Kind', hostname: 'B2', vendor: 'brother-ql', host: '10.0.0.1' }).run();
-    db.insert(printers).values({ name: 'Eltern', hostname: 'B2', vendor: 'zebra-zpl', host: '10.0.0.2' }).run();
+    const [group] = db.insert(printerGroups).values({ name: 'Kind', hostname: 'B2' }).returning().all();
+    db.insert(printers).values({ groupId: group!.id, name: 'Kind', vendor: 'brother-ql', host: '10.0.0.1' }).run();
+    db.insert(printers).values({ groupId: group!.id, name: 'Eltern', vendor: 'zebra-zpl', host: '10.0.0.2' }).run();
     const orchestrator = new PrintOrchestrator({ db, env });
 
     await orchestrator.start();
 
-    // Zwei Zeilen, ein Hostname -> ein Poller, sonst würde derselbe
-    // Check-in doppelt bei ChurchTools abgeholt und verarbeitet.
     expect(orchestrator.status().pollers).toHaveLength(1);
     await orchestrator.stop();
   });
@@ -78,7 +83,7 @@ describe('PrintOrchestrator', () => {
     expect(orchestrator.status().pollers).toHaveLength(0);
 
     db.insert(churchtoolsConnection).values({ baseUrl: 'https://example.church.tools', username: 'bot', passwordEnc: encryptSecret('secret', env.ENCRYPTION_KEY) }).run();
-    db.insert(printers).values({ name: 'B1', hostname: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).run();
+    makePrinterGroupWithLeg('B1');
 
     await orchestrator.reload();
 
@@ -87,12 +92,12 @@ describe('PrintOrchestrator', () => {
   });
 
   it('routes handleIncomingJob through the print pipeline for a known printer, independent of ChurchTools', async () => {
-    const printer = db.insert(printers).values({ name: 'B1', hostname: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).returning().all()[0]!;
+    const { group } = makePrinterGroupWithLeg('B1');
     const orchestrator = new PrintOrchestrator({ db, env });
     await orchestrator.start();
 
     // Kein Layout für "parent" konfiguriert -> nichts zu drucken, aber der Job wird als eingegangen bestätigt.
-    const result = await orchestrator.handleIncomingJob(printer.hostname, 'name=Max\nid=1\ncode=AB\ntype=parent');
+    const result = await orchestrator.handleIncomingJob(group.hostname, 'name=Max\nid=1\ncode=AB\ntype=parent');
 
     expect(result.ok).toBe(true);
     await orchestrator.stop();
@@ -115,7 +120,7 @@ describe('PrintOrchestrator — Gruppen-Sammelausdruck', () => {
   });
 
   it('triggerWindowCloseSummaries() generates a summary for every trigger="window_close" layout, but not "manual" ones', async () => {
-    const outputPrinter = db.insert(printers).values({ name: 'Ausgabe', hostname: 'OUT', vendor: 'brother-ql', host: '10.0.0.9' }).returning().all()[0]!;
+    const { leg: outputPrinter } = makePrinterGroupWithLeg('OUT');
     const [windowCloseLayout] = db.insert(summaryLayouts).values({ name: 'A', printerId: outputPrinter.id, trigger: 'window_close' }).returning().all();
     const [otherWindowCloseLayout] = db.insert(summaryLayouts).values({ name: 'B', printerId: outputPrinter.id, trigger: 'window_close' }).returning().all();
     db.insert(summaryLayouts).values({ name: 'C', printerId: outputPrinter.id, trigger: 'manual' }).run();
@@ -135,7 +140,7 @@ describe('PrintOrchestrator — Gruppen-Sammelausdruck', () => {
   });
 
   it('triggerWindowCloseSummaries() does not let one failing layout stop the others', async () => {
-    const outputPrinter = db.insert(printers).values({ name: 'Ausgabe', hostname: 'OUT', vendor: 'brother-ql', host: '10.0.0.9' }).returning().all()[0]!;
+    const { leg: outputPrinter } = makePrinterGroupWithLeg('OUT');
     db.insert(summaryLayouts).values({ name: 'A', printerId: outputPrinter.id, trigger: 'window_close' }).run();
     const [okLayout] = db.insert(summaryLayouts).values({ name: 'B', printerId: outputPrinter.id, trigger: 'window_close' }).returning().all();
 

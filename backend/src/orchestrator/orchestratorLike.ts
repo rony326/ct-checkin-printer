@@ -1,7 +1,7 @@
 /** Spiegelt `PrinterPoller.status()` — hier neu definiert statt importiert, damit dieses File von der Orchestrator-Implementierung entkoppelt bleibt. */
 export interface OrchestratorPollerStatus {
-  printerId: number;
-  printerIds: number[];
+  groupId: number;
+  legIds: number[];
   running: boolean;
   mode: 'sleeping' | 'idle' | 'active';
   consecutiveErrors: number;
