@@ -113,24 +113,49 @@ zugehörigen `printers`-Zeilen.
 
 ### Migration bestehender Daten
 
-Rein additiv, keine Fremdschlüssel in `label_layouts`/`print_queue`/
-`print_log`/`summary_layouts` (alle referenzieren `printers.id`) müssen
-angefasst werden, weil **die ID jeder bestehenden `printers`-Zeile
-unverändert bleibt**:
+Keine Fremdschlüssel in `label_layouts`/`print_queue`/`print_log`/
+`summary_layouts` (alle referenzieren `printers.id`) müssen angefasst werden,
+weil **die ID jeder bestehenden `printers`-Zeile unverändert bleibt**. Eine
+Komplikation: `printers.hostname` ist heute (Zwischenstand dieser Session)
+NICHT eindeutig — es kann bereits mehrere Zeilen mit demselben Hostnamen
+geben (genau der "virtuelle Drucker"-Fall, um den es hier geht). Ein naives
+"eine Gruppe pro Zeile" würde für so einen Hostnamen zwei
+`printer_groups`-Zeilen mit demselben Hostnamen erzeugen und sofort an der
+neuen `UNIQUE`-Regel scheitern. Migration pro **distinktem Hostnamen**, nicht
+pro Zeile:
 
-1. Neue Tabelle `printer_groups` anlegen.
-2. Für jede bestehende `printers`-Zeile eine `printer_groups`-Zeile mit
-   **derselben ID** einfügen, befüllt aus den heutigen
-   hostname/name/active_times_*/check_*/status_webhook_enabled-Werten dieser
-   Zeile.
-3. `printers` neu aufbauen (SQLite-Tabellen-Neubau-Pattern, da Spalten
-   entfernt und eine NOT-NULL-FK-Spalte ergänzt wird): neue Struktur wie
-   oben, `group_id` jeder migrierten Zeile = ihre eigene alte ID.
+1. Neue Tabelle `printer_groups` anlegen (mit `UNIQUE`-Index auf `hostname`).
+2. Pro distinktem Hostnamen genau **eine** `printer_groups`-Zeile einfügen —
+   Quelle sind die Werte der Zeile mit der **niedrigsten ID** für diesen
+   Hostnamen (deckt sich mit der bestehenden "primäres Bein"-Konvention in
+   `PrinterPoller`), und die neue Gruppen-ID = diese niedrigste `printers.id`:
+   ```sql
+   INSERT INTO printer_groups (id, hostname, name, active_times_mode, active_times_expr, check_enabled, check_retry_ms, status_webhook_enabled, created_at, updated_at)
+   SELECT id, hostname, name, active_times_mode, active_times_expr, check_enabled, check_retry_ms, status_webhook_enabled, created_at, updated_at
+   FROM printers
+   WHERE id IN (SELECT MIN(id) FROM printers GROUP BY hostname);
+   ```
+3. `printers` neu aufbauen (SQLite-Tabellen-Neubau-Pattern, siehe
+   `migrations/0002_plain_shocker.sql` für den Stil): neue Struktur wie oben,
+   **jede** Zeile (nicht nur die "primäre") bekommt `group_id` = die
+   niedrigste `printers.id` mit demselben Hostnamen:
+   ```sql
+   INSERT INTO __new_printers (id, group_id, name, vendor, host, port, media_id, created_at, updated_at)
+   SELECT p.id,
+          (SELECT MIN(p2.id) FROM printers p2 WHERE p2.hostname = p.hostname),
+          p.name, p.vendor, p.host, p.port, p.media_id, p.created_at, p.updated_at
+   FROM printers p;
+   ```
 4. Alte `printers`-Tabelle droppen, neue umbenennen.
 
-Ergebnis: jeder heute bestehende Drucker ist danach automatisch eine
-Einzel-Drucker-Gruppe mit einem Bein — ohne jede sichtbare Verhaltensänderung
-für bestehende Installationen.
+Verifiziert gegen eine Test-DB mit genau diesem Fall (ein normaler
+Einzel-Drucker + zwei Zeilen mit gemeinsamem Hostnamen, unterschiedlichem
+`check_enabled`): Ergebnis ist eine Gruppe je distinktem Hostnamen, alle Beine
+zeigen korrekt auf ihre Gruppe, keine Constraint-Verletzung, keine
+verwaisten Fremdschlüssel. Nicht-primäre Beine verlieren ihre bisherige
+(sowieso redundante) eigene Kopie von Name/Zeitfenster/Check — das ist
+beabsichtigt, diese Werte lebten schon vorher effektiv nur wirksam auf dem
+primären Bein (siehe `PrinterPoller` vor diesem Umbau).
 
 ## Backend-API
 
