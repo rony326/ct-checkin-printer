@@ -68,25 +68,38 @@ export interface LabelLayoutWithAlso extends LabelLayout {
   alsoLayoutIds: number[];
 }
 
-export interface Printer {
+export interface PrinterLeg {
   id: number;
+  groupId: number;
   name: string;
-  hostname: string;
   vendor: Vendor;
   host: string;
   port: number;
-  activeTimesMode: ActiveTimesMode;
-  activeTimesExpr: string | null;
-  checkEnabled: boolean;
-  checkRetryMs: number;
-  statusWebhookEnabled: boolean;
   mediaId: number | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface PrinterDetail extends Printer {
+export interface PrinterLegWithRoutes extends PrinterLeg {
   routes: LabelLayoutWithAlso[];
+}
+
+export interface PrinterGroup {
+  id: number;
+  hostname: string;
+  name: string;
+  activeTimesMode: ActiveTimesMode;
+  activeTimesExpr: string | null;
+  checkEnabled: boolean;
+  checkRetryMs: number;
+  statusWebhookEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  legs: PrinterLeg[];
+}
+
+export interface PrinterGroupDetail extends Omit<PrinterGroup, 'legs'> {
+  legs: PrinterLegWithRoutes[];
 }
 
 export interface ChurchToolsConnectionState {
@@ -129,7 +142,7 @@ export interface DocumentPrinter {
 export type PollerMode = 'sleeping' | 'idle' | 'active';
 
 export interface DashboardPrinterStatus {
-  printerId: number;
+  groupId: number;
   hostname: string;
   name: string;
   running: boolean;
