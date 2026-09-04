@@ -14,6 +14,7 @@ import { registerFontRoutes } from './fonts.js';
 import { registerLabelLayoutRoutes } from './labelLayouts.js';
 import { registerLogoRoutes } from './logos.js';
 import { registerMediaTypeRoutes } from './mediaTypes.js';
+import { registerPrinterGroupRoutes } from './printerGroups.js';
 import { registerPrinterRoutes } from './printers.js';
 import { registerSummaryLayoutRoutes } from './summaryLayouts.js';
 import { registerVariableRoutes } from './variables.js';
@@ -54,6 +55,7 @@ export async function buildServer(db: Db, env: Env, orchestrator: OrchestratorLi
   await registerFontRoutes(app);
   await registerLogoRoutes(app);
   await registerLabelLayoutRoutes(app);
+  await registerPrinterGroupRoutes(app);
   await registerPrinterRoutes(app);
   await registerChurchToolsConnectionRoutes(app);
   await registerWebhookOutgoingRoutes(app);
