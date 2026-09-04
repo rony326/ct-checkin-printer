@@ -1,6 +1,6 @@
 import { eq, inArray } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
-import { labelLayoutAlso, labelLayouts, printers } from '../db/schema.js';
+import { labelLayoutAlso, labelLayouts, printerGroups, printers } from '../db/schema.js';
 
 export type LabelLayoutRow = typeof labelLayouts.$inferSelect;
 
@@ -12,26 +12,28 @@ export type LabelLayoutRow = typeof labelLayouts.$inferSelect;
  * Primär-Layout. Gibt `[]` zurück, wenn kein Layout für diesen Hostnamen+Typ
  * konfiguriert ist (mirrors v1: "Kein Route für Label-Typ ... übersprungen").
  *
- * Gesucht wird über ALLE `printers`-Zeilen mit diesem Hostnamen, nicht nur
- * eine — mehrere Zeilen mit demselben Hostnamen bilden einen "virtuellen
- * Drucker" mit mehreren physischen Beinen (siehe `db/schema.ts` Kommentar zu
- * `printers.hostname`, v1-Vorbild: Routing-Modus in printers-config.js). So
- * kann z.B. "parent" auf Drucker A und "child" auf Drucker B als jeweils
- * PRIMÄRES Layout landen, obwohl beide vom selben ChurchTools-Ort kommen.
+ * Gesucht wird über ALLE physischen Beine (`printers`) der `printer_groups`-
+ * Zeile mit diesem Hostnamen — mehrere Beine derselben Gruppe bilden einen
+ * "virtuellen Drucker" (siehe Spec docs/superpowers/specs/2026-09-04-printer-groups-design.md).
+ * So kann z.B. "parent" auf Bein A und "child" auf Bein B als jeweils
+ * PRIMÄRES Layout landen, obwohl beide von derselben ChurchTools-Gruppe kommen.
  */
 export function resolveLayoutsForJob(db: Db, hostname: string, ctTypeKey: string): LabelLayoutRow[] {
-  const printerIds = db
+  const group = db.select({ id: printerGroups.id }).from(printerGroups).where(eq(printerGroups.hostname, hostname)).get();
+  if (!group) return [];
+
+  const legIds = db
     .select({ id: printers.id })
     .from(printers)
-    .where(eq(printers.hostname, hostname))
+    .where(eq(printers.groupId, group.id))
     .all()
     .map((row) => row.id);
-  if (printerIds.length === 0) return [];
+  if (legIds.length === 0) return [];
 
   const primary = db
     .select()
     .from(labelLayouts)
-    .where(inArray(labelLayouts.printerId, printerIds))
+    .where(inArray(labelLayouts.printerId, legIds))
     .all()
     .find((layout) => layout.ctTypeKey === ctTypeKey);
   if (!primary) return [];
@@ -45,7 +47,6 @@ export function resolveLayoutsForJob(db: Db, hostname: string, ctTypeKey: string
   if (alsoIds.length === 0) return [primary];
 
   const alsoLayouts = db.select().from(labelLayouts).where(inArray(labelLayouts.id, alsoIds)).all();
-  // Reihenfolge von alsoIds beibehalten, fehlende (gelöschte) Layouts überspringen.
   const byId = new Map(alsoLayouts.map((l) => [l.id, l]));
   const ordered = alsoIds.map((id) => byId.get(id)).filter((l): l is LabelLayoutRow => l !== undefined);
 
