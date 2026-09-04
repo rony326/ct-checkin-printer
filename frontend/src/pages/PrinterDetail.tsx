@@ -59,23 +59,39 @@ export function PrinterDetail() {
   }
 
   async function updateLeg(legId: number, patch: { name?: string; vendor?: Vendor; host?: string; port?: number; mediaId?: number | null }) {
-    await api.put(`/api/printers/${legId}`, patch);
-    await load();
+    try {
+      await api.put(`/api/printers/${legId}`, patch);
+      await load();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Gerät konnte nicht aktualisiert werden');
+    }
   }
 
   async function removeLeg(legId: number) {
-    await api.delete(`/api/printers/${legId}`);
-    await load();
+    try {
+      await api.delete(`/api/printers/${legId}`);
+      await load();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Gerät konnte nicht entfernt werden');
+    }
   }
 
   async function addLeg() {
-    await api.post(`/api/printer-groups/${id}/legs`, { name: 'Neues Gerät', vendor: 'brother-ql', host: '0.0.0.0' });
-    await load();
+    try {
+      await api.post(`/api/printer-groups/${id}/legs`, { name: 'Neues Gerät', vendor: 'brother-ql', host: '0.0.0.0' });
+      await load();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Gerät konnte nicht hinzugefügt werden');
+    }
   }
 
   async function assignLayout(legId: number, layoutId: number) {
-    await api.put(`/api/label-layouts/${layoutId}`, { printerId: legId });
-    await load();
+    try {
+      await api.put(`/api/label-layouts/${layoutId}`, { printerId: legId });
+      await load();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Layout konnte nicht zugeordnet werden');
+    }
   }
 
   async function unassignLayout(layoutId: number) {
@@ -196,6 +212,20 @@ interface LegCardProps {
 }
 
 function LegCard({ leg, mediaTypes, allLayouts, unassignedLayouts, canRemove, onUpdate, onRemove, onAssignLayout, onUnassignLayout, onToggleAlso }: LegCardProps) {
+  const [nameDraft, setNameDraft] = useState(leg.name);
+  const [hostDraft, setHostDraft] = useState(leg.host);
+  const [portDraft, setPortDraft] = useState(String(leg.port));
+
+  useEffect(() => {
+    setNameDraft(leg.name);
+  }, [leg.name]);
+  useEffect(() => {
+    setHostDraft(leg.host);
+  }, [leg.host]);
+  useEffect(() => {
+    setPortDraft(String(leg.port));
+  }, [leg.port]);
+
   return (
     <div style={{ borderBottom: '1px solid var(--line)', paddingBottom: '1rem', marginBottom: '1rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
@@ -209,7 +239,7 @@ function LegCard({ leg, mediaTypes, allLayouts, unassignedLayouts, canRemove, on
       <div className="field-row">
         <div className="field">
           <label>Name</label>
-          <input type="text" value={leg.name} onChange={(e) => onUpdate({ name: e.target.value })} />
+          <input type="text" value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} onBlur={() => onUpdate({ name: nameDraft })} />
         </div>
         <div className="field">
           <label>Hersteller</label>
@@ -222,11 +252,11 @@ function LegCard({ leg, mediaTypes, allLayouts, unassignedLayouts, canRemove, on
       <div className="field-row">
         <div className="field">
           <label>Netzwerkadresse (IP)</label>
-          <input type="text" value={leg.host} onChange={(e) => onUpdate({ host: e.target.value })} />
+          <input type="text" value={hostDraft} onChange={(e) => setHostDraft(e.target.value)} onBlur={() => onUpdate({ host: hostDraft })} />
         </div>
         <div className="field">
           <label>Port</label>
-          <input type="number" value={leg.port} onChange={(e) => onUpdate({ port: Number(e.target.value) })} />
+          <input type="number" value={portDraft} onChange={(e) => setPortDraft(e.target.value)} onBlur={() => onUpdate({ port: Number(portDraft) })} />
         </div>
       </div>
       <div className="field" style={{ marginBottom: '0.75rem' }}>
