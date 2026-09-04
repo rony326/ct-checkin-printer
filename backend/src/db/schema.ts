@@ -19,18 +19,10 @@ export const churchtoolsConnection = sqliteTable('churchtools_connection', {
   ...timestamps,
 });
 
-export const printers = sqliteTable('printers', {
+export const printerGroups = sqliteTable('printer_groups', {
   id: integer('id').primaryKey({ autoIncrement: true }),
+  hostname: text('hostname').notNull().unique(),
   name: text('name').notNull(),
-  // CT-"Ort", technischer Bezeichner — bewusst NICHT eindeutig: mehrere Zeilen
-  // mit demselben Hostnamen bilden einen "virtuellen Drucker" mit mehreren
-  // physischen Beinen (siehe v1 Routing-Modus, printers-config.js "labels{}")
-  // — z.B. "parent" auf Gerät A mit Format X, "child" auf Gerät B mit Format Y,
-  // beide unter demselben ChurchTools-Ort. Siehe orchestrator/routing.ts.
-  hostname: text('hostname').notNull(),
-  vendor: text('vendor', { enum: ['brother-ql', 'zebra-zpl'] }).notNull(),
-  host: text('host').notNull(),
-  port: integer('port').notNull().default(9100),
   activeTimesMode: text('active_times_mode', { enum: ['inherit', 'always', 'custom'] })
     .notNull()
     .default('inherit'),
@@ -38,6 +30,18 @@ export const printers = sqliteTable('printers', {
   checkEnabled: integer('check_enabled', { mode: 'boolean' }).notNull().default(true),
   checkRetryMs: integer('check_retry_ms').notNull().default(30000),
   statusWebhookEnabled: integer('status_webhook_enabled', { mode: 'boolean' }).notNull().default(false),
+  ...timestamps,
+});
+
+export const printers = sqliteTable('printers', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  groupId: integer('group_id')
+    .notNull()
+    .references(() => printerGroups.id),
+  name: text('name').notNull(),
+  vendor: text('vendor', { enum: ['brother-ql', 'zebra-zpl'] }).notNull(),
+  host: text('host').notNull(),
+  port: integer('port').notNull().default(9100),
   mediaId: integer('media_id').references(() => mediaTypes.id),
   ...timestamps,
 });
