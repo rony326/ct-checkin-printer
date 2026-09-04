@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Db } from '../db/client.js';
-import { printers } from '../db/schema.js';
+import { printerGroups, printers } from '../db/schema.js';
 import { enqueueJob, listPendingJobs, recordFailedAttempt, recordSuccess, type QueuedJobPayload } from './printQueueStore.js';
 import { createTestDb } from './testDb.js';
 
@@ -13,7 +13,8 @@ const payload: QueuedJobPayload = { rawData: 'name=Max\nid=1\ncode=AB12\ntype=pa
 
 beforeEach(async () => {
   ({ db, cleanup } = await createTestDb());
-  printerId = db.insert(printers).values({ name: 'B1', hostname: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).returning().all()[0]!.id;
+  const [group] = db.insert(printerGroups).values({ name: 'B1', hostname: 'B1' }).returning().all();
+  printerId = db.insert(printers).values({ groupId: group!.id, name: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).returning().all()[0]!.id;
 });
 
 afterEach(() => cleanup());
@@ -30,7 +31,8 @@ describe('enqueueJob / listPendingJobs', () => {
   });
 
   it('does not return jobs enqueued for a different printer', () => {
-    const otherPrinterId = db.insert(printers).values({ name: 'B2', hostname: 'B2', vendor: 'brother-ql', host: '10.0.0.2' }).returning().all()[0]!.id;
+    const [group] = db.insert(printerGroups).values({ name: 'B2', hostname: 'B2' }).returning().all();
+    const otherPrinterId = db.insert(printers).values({ groupId: group!.id, name: 'B2', vendor: 'brother-ql', host: '10.0.0.2' }).returning().all()[0]!.id;
     enqueueJob(db, { printerId, layoutId: null, payload, reason: 'x' });
 
     expect(listPendingJobs(db, otherPrinterId)).toHaveLength(0);

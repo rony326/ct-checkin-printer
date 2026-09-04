@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Db } from '../db/client.js';
-import { printers } from '../db/schema.js';
+import { printerGroups, printers } from '../db/schema.js';
 import { QueueMonitor } from './QueueMonitor.js';
 import { enqueueJob, listPendingJobs } from './printQueueStore.js';
 import { createTestDb } from './testDb.js';
@@ -11,7 +11,8 @@ let printerId: number;
 
 beforeEach(async () => {
   ({ db, cleanup } = await createTestDb());
-  printerId = db.insert(printers).values({ name: 'B1', hostname: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).returning().all()[0]!.id;
+  const [group] = db.insert(printerGroups).values({ name: 'B1', hostname: 'B1' }).returning().all();
+  printerId = db.insert(printers).values({ groupId: group!.id, name: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).returning().all()[0]!.id;
   vi.useFakeTimers();
 });
 
