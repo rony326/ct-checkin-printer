@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Db } from '../db/client.js';
 import type { Env } from '../env.js';
-import { labelLayoutAlso, labelLayouts, mediaTypes, printLog, printQueue, printers, type LabelElement } from '../db/schema.js';
+import { labelLayoutAlso, labelLayouts, mediaTypes, printLog, printQueue, printerGroups, printers, type LabelElement } from '../db/schema.js';
 import { PrinterStatus, type LabelPrinterAdapter, type PrinterStatusResult } from '../adapters/printer/types.js';
 import { PrintPipeline } from './PrintPipeline.js';
 import { createTestDb } from './testDb.js';
@@ -34,7 +34,9 @@ function makeMedia(vendor: 'brother-ql' | 'zebra-zpl' = 'brother-ql') {
 }
 
 function makePrinter(hostname: string, vendor: 'brother-ql' | 'zebra-zpl' = 'brother-ql') {
-  return db.insert(printers).values({ name: hostname, hostname, vendor, host: '10.0.0.1' }).returning().all()[0]!;
+  const [group] = db.insert(printerGroups).values({ name: hostname, hostname }).returning().all();
+  const [leg] = db.insert(printers).values({ groupId: group!.id, name: hostname, vendor, host: '10.0.0.1' }).returning().all();
+  return { ...leg!, hostname: group!.hostname };
 }
 
 const STATIC_ELEMENTS: LabelElement[] = [{ id: 'a', type: 'static', xMm: 1, yMm: 1, value: 'Hallo', fontSize: 10, bold: false, align: 'left' }];

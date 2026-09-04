@@ -3,7 +3,7 @@ import { collectFontAndLogoIds, toMediaDefinition } from '../api/labelLayouts.js
 import { PrinterStatus, type LabelPrinterAdapter } from '../adapters/printer/types.js';
 import type { AdapterRegistryPrinter } from './adapterRegistry.js';
 import type { Db } from '../db/client.js';
-import { labelLayouts, mediaTypes, printLog, printers, type LabelElement } from '../db/schema.js';
+import { labelLayouts, mediaTypes, printLog, printerGroups, printers, type LabelElement } from '../db/schema.js';
 import type { Env } from '../env.js';
 import { renderLabel } from '../rendering/LabelRenderer.js';
 import { VENDOR_DPI } from '../rendering/dimensions.js';
@@ -48,12 +48,12 @@ export class PrintPipeline {
   async processIncomingJob(hostname: string, rawData: string, now: () => number = Date.now): Promise<ProcessIncomingJobResult> {
     if (!rawData || !rawData.trim()) return { enriched: false, printed: 0, queued: 0 };
 
-    // Repräsentativer Drucker-Datensatz für diesen Hostnamen, nur für die
-    // Check-in-Webhook-Identität (name/host) — bei mehreren physischen Beinen
-    // unter demselben Hostnamen (siehe routing.ts) ist das der zuerst
-    // angelegte; das eigentliche Ziel je Etikett bestimmt `layout.printerId`.
-    const originPrinter = this.getPrimaryPrinterByHostname(hostname);
-    if (!originPrinter) return { enriched: false, printed: 0, queued: 0 };
+    // Repräsentative Identität für diesen Hostnamen, nur für die Check-in-
+    // Webhook-Identität (name/host) — bei mehreren physischen Beinen in
+    // dieser Gruppe (siehe routing.ts) ist `leg` das zuerst angelegte; das
+    // eigentliche Druckziel je Etikett bestimmt weiterhin `layout.printerId`.
+    const origin = this.getOriginByHostname(hostname);
+    if (!origin) return { enriched: false, printed: 0, queued: 0 };
 
     const parsed = parseCheckinData(rawData);
     const unixTimestampSeconds = Math.floor(now() / 1000);
@@ -68,7 +68,7 @@ export class PrintPipeline {
       } else {
         queued++;
         enqueueJob(this.deps.db, {
-          printerId: layout.printerId ?? originPrinter.id,
+          printerId: layout.printerId ?? origin.leg.id,
           layoutId: layout.id,
           payload: { rawData, unixTimestampSeconds },
           reason: outcome.errorMessage ?? 'Unbekannter Fehler',
@@ -77,7 +77,7 @@ export class PrintPipeline {
       }
     }
 
-    const payload = buildCheckinWebhookPayload(originPrinter, parsed, unixTimestampSeconds);
+    const payload = buildCheckinWebhookPayload({ hostname: origin.group.hostname, name: origin.group.name, host: origin.leg.host }, parsed, unixTimestampSeconds);
     await dispatchOutgoingWebhooks(this.deps.db, this.deps.env, 'checkin', payload);
 
     return { enriched: true, printed, queued };
@@ -161,8 +161,12 @@ export class PrintPipeline {
     return this.deps.db.select().from(printers).where(eq(printers.id, printerId)).get();
   }
 
-  private getPrimaryPrinterByHostname(hostname: string) {
-    return this.deps.db.select().from(printers).where(eq(printers.hostname, hostname)).orderBy(asc(printers.id)).get();
+  private getOriginByHostname(hostname: string): { group: typeof printerGroups.$inferSelect; leg: typeof printers.$inferSelect } | undefined {
+    const group = this.deps.db.select().from(printerGroups).where(eq(printerGroups.hostname, hostname)).get();
+    if (!group) return undefined;
+    const leg = this.deps.db.select().from(printers).where(eq(printers.groupId, group.id)).orderBy(asc(printers.id)).get();
+    if (!leg) return undefined;
+    return { group, leg };
   }
 
   private getLayoutRow(layoutId: number): LabelLayoutRow | undefined {
