@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { seedMediaTypes } from '../db/seed.js';
 import { createDb, type Db } from '../db/client.js';
 import type { Env } from '../env.js';
+import { printerGroups, printers } from '../db/schema.js';
 import { buildServer } from './server.js';
 
 let app: FastifyInstance;
@@ -197,76 +198,63 @@ function startFakeHttp(handler: (req: import('node:http').IncomingMessage, res: 
 }
 
 describe('Printers API', () => {
-  it('legt einen Drucker an, aktualisiert und löscht ihn wieder', async () => {
+  it('legt eine Druckergruppe an, aktualisiert ihr Zeitfenster und löscht sie wieder', async () => {
     const createRes = await app.inject({
       method: 'POST',
-      url: '/api/printers',
+      url: '/api/printer-groups',
       headers: { cookie: sessionCookie, 'content-type': 'application/json' },
-      payload: { name: 'Empfang', hostname: 'B2', vendor: 'brother-ql', host: '192.168.1.50' },
+      payload: { name: 'Empfang', hostname: 'B2', legs: [{ name: 'Empfang', vendor: 'brother-ql', host: '192.168.1.50' }] },
     });
     expect(createRes.statusCode).toBe(201);
     const created = createRes.json();
 
     const updateRes = await app.inject({
       method: 'PUT',
-      url: `/api/printers/${created.id}`,
+      url: `/api/printer-groups/${created.id}`,
       headers: { cookie: sessionCookie, 'content-type': 'application/json' },
       payload: { activeTimesMode: 'custom', activeTimesExpr: 'So:09:00-12:00' },
     });
     expect(updateRes.statusCode).toBe(200);
     expect(updateRes.json().activeTimesExpr).toBe('So:09:00-12:00');
 
-    const detailRes = await app.inject({ method: 'GET', url: `/api/printers/${created.id}`, headers: { cookie: sessionCookie } });
-    expect(detailRes.json().routes).toEqual([]);
+    const detailRes = await app.inject({ method: 'GET', url: `/api/printer-groups/${created.id}`, headers: { cookie: sessionCookie } });
+    expect(detailRes.json().legs[0].routes).toEqual([]);
 
-    const deleteRes = await app.inject({ method: 'DELETE', url: `/api/printers/${created.id}`, headers: { cookie: sessionCookie } });
+    const deleteRes = await app.inject({ method: 'DELETE', url: `/api/printer-groups/${created.id}`, headers: { cookie: sessionCookie } });
     expect(deleteRes.statusCode).toBe(200);
   });
 
-  it('lehnt ein ungültiges activeTimesExpr ab', async () => {
+  it('lehnt ein ungültiges activeTimesExpr beim Anlegen einer Druckergruppe ab', async () => {
     const res = await app.inject({
       method: 'POST',
-      url: '/api/printers',
+      url: '/api/printer-groups',
       headers: { cookie: sessionCookie, 'content-type': 'application/json' },
-      payload: { name: 'X', hostname: 'B3', vendor: 'brother-ql', host: '192.168.1.51', activeTimesMode: 'custom', activeTimesExpr: 'Xx:99:00-10:00' },
+      payload: {
+        name: 'X',
+        hostname: 'B3',
+        legs: [{ name: 'X', vendor: 'brother-ql', host: '192.168.1.51' }],
+        activeTimesMode: 'custom',
+        activeTimesExpr: 'Xx:99:00-10:00',
+      },
     });
     expect(res.statusCode).toBe(400);
   });
 
-  it('erlaubt mehrere Drucker mit demselben Hostname (virtueller Drucker mit mehreren physischen Beinen, siehe v1-Routing-Modus)', async () => {
-    await app.inject({
-      method: 'POST',
-      url: '/api/printers',
-      headers: { cookie: sessionCookie, 'content-type': 'application/json' },
-      payload: { name: 'A', hostname: 'DUP', vendor: 'brother-ql', host: '192.168.1.60' },
-    });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/printers',
-      headers: { cookie: sessionCookie, 'content-type': 'application/json' },
-      payload: { name: 'B', hostname: 'DUP', vendor: 'brother-ql', host: '192.168.1.61' },
-    });
-    expect(res.statusCode).toBe(201);
-  });
-
-  it('hebt beim Löschen die Layout-Zuordnung auf statt das Layout zu löschen', async () => {
-    const printerRes = await app.inject({
-      method: 'POST',
-      url: '/api/printers',
-      headers: { cookie: sessionCookie, 'content-type': 'application/json' },
-      payload: { name: 'Temp', hostname: 'TEMP1', vendor: 'brother-ql', host: '192.168.1.70' },
-    });
-    const printer = printerRes.json();
+  it('hebt beim Löschen eines einzelnen Beins die Layout-Zuordnung auf statt das Layout zu löschen', async () => {
+    const [group] = db.insert(printerGroups).values({ name: 'Temp', hostname: 'TEMP1' }).returning().all();
+    const [legA] = db.insert(printers).values({ groupId: group!.id, name: 'Temp-A', vendor: 'brother-ql', host: '192.168.1.70' }).returning().all();
+    db.insert(printers).values({ groupId: group!.id, name: 'Temp-B', vendor: 'brother-ql', host: '192.168.1.71' }).run();
 
     const layoutRes = await app.inject({
       method: 'POST',
       url: '/api/label-layouts',
       headers: { cookie: sessionCookie, 'content-type': 'application/json' },
-      payload: { name: 'Mit Drucker', ctTypeKey: 'x', printerId: printer.id },
+      payload: { name: 'Mit Drucker', ctTypeKey: 'x', printerId: legA!.id },
     });
     const layout = layoutRes.json();
 
-    await app.inject({ method: 'DELETE', url: `/api/printers/${printer.id}`, headers: { cookie: sessionCookie } });
+    const deleteRes = await app.inject({ method: 'DELETE', url: `/api/printers/${legA!.id}`, headers: { cookie: sessionCookie } });
+    expect(deleteRes.statusCode).toBe(200);
 
     const layoutAfter = await app.inject({ method: 'GET', url: `/api/label-layouts/${layout.id}`, headers: { cookie: sessionCookie } });
     expect(layoutAfter.json().printerId).toBeNull();
@@ -479,13 +467,9 @@ describe('Document-Printers API', () => {
 
 describe('Summary-Layouts API', () => {
   it('legt ein Sammel-Layout mit einem Endlosband-Zieldrucker an und liefert die Default-Spalten', async () => {
-    const printerRes = await app.inject({
-      method: 'POST',
-      url: '/api/printers',
-      headers: { cookie: sessionCookie, 'content-type': 'application/json' },
-      payload: { name: 'Sammelband', hostname: 'SAMMEL1', vendor: 'brother-ql', host: '192.168.1.90' },
-    });
-    const printerId = printerRes.json().id;
+    const [group] = db.insert(printerGroups).values({ name: 'Sammelband', hostname: 'SAMMEL1' }).returning().all();
+    const [leg] = db.insert(printers).values({ groupId: group!.id, name: 'Sammelband', vendor: 'brother-ql', host: '192.168.1.90' }).returning().all();
+    const printerId = leg!.id;
 
     const createRes = await app.inject({
       method: 'POST',
@@ -546,13 +530,9 @@ describe('Summary-Layouts API', () => {
   });
 
   it('ruft den Orchestrator für den manuellen Trigger auf (hier: noop-Orchestrator ohne laufenden Dienst)', async () => {
-    const printerRes = await app.inject({
-      method: 'POST',
-      url: '/api/printers',
-      headers: { cookie: sessionCookie, 'content-type': 'application/json' },
-      payload: { name: 'Sammelband2', hostname: 'SAMMEL2', vendor: 'brother-ql', host: '192.168.1.92' },
-    });
-    const printerId = printerRes.json().id;
+    const [group] = db.insert(printerGroups).values({ name: 'Sammelband2', hostname: 'SAMMEL2' }).returning().all();
+    const [leg] = db.insert(printers).values({ groupId: group!.id, name: 'Sammelband2', vendor: 'brother-ql', host: '192.168.1.92' }).returning().all();
+    const printerId = leg!.id;
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/summary-layouts',
@@ -569,12 +549,12 @@ describe('Summary-Layouts API', () => {
 
 describe('Auth API', () => {
   it('rejects protected routes without a session cookie', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/printers' });
+    const res = await app.inject({ method: 'GET', url: '/api/printer-groups' });
     expect(res.statusCode).toBe(401);
   });
 
   it('rejects protected routes with a garbage cookie', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/printers', headers: { cookie: 'sessionId=not-a-real-session' } });
+    const res = await app.inject({ method: 'GET', url: '/api/printer-groups', headers: { cookie: 'sessionId=not-a-real-session' } });
     expect(res.statusCode).toBe(401);
   });
 
@@ -609,7 +589,7 @@ describe('Auth API', () => {
     const cookie = loginRes.cookies.find((c) => c.name === 'sessionId');
     expect(cookie).toBeDefined();
 
-    const protectedRes = await app.inject({ method: 'GET', url: '/api/printers', headers: { cookie: `${cookie!.name}=${cookie!.value}` } });
+    const protectedRes = await app.inject({ method: 'GET', url: '/api/printer-groups', headers: { cookie: `${cookie!.name}=${cookie!.value}` } });
     expect(protectedRes.statusCode).toBe(200);
   });
 
@@ -621,11 +601,11 @@ describe('Auth API', () => {
     const logoutRes = await app.inject({ method: 'POST', url: '/api/auth/logout', headers: { cookie: ownCookie } });
     expect(logoutRes.json()).toEqual({ ok: true });
 
-    const afterLogout = await app.inject({ method: 'GET', url: '/api/printers', headers: { cookie: ownCookie } });
+    const afterLogout = await app.inject({ method: 'GET', url: '/api/printer-groups', headers: { cookie: ownCookie } });
     expect(afterLogout.statusCode).toBe(401);
 
     // Die für den Rest der Testsuite geteilte `sessionCookie` bleibt von diesem isolierten Login/Logout unberührt.
-    const sharedStillWorks = await app.inject({ method: 'GET', url: '/api/printers', headers: { cookie: sessionCookie } });
+    const sharedStillWorks = await app.inject({ method: 'GET', url: '/api/printer-groups', headers: { cookie: sessionCookie } });
     expect(sharedStillWorks.statusCode).toBe(200);
   });
 });

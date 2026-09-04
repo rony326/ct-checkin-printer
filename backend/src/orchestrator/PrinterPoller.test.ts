@@ -266,3 +266,39 @@ describe('PrinterPoller multi-leg groups (virtueller Drucker mit mehreren physis
     poller.stop();
   });
 });
+
+describe('PrinterPoller Sicherheits-Invariante: ChurchTools sieht nie physische Gerätedaten', () => {
+  it('ruft activatePrinter/hidePrinter ausschliesslich mit Gruppen-Hostname/-Name auf, nie mit einem Bein-Feld', async () => {
+    const group: PrinterPollerGroup = { ...BASE_GROUP, activeTimesMode: 'custom', activeTimesExpr: 'Mo:10:05-10:10' };
+    const legs: PrinterPollerLeg[] = [
+      { id: 50, name: 'Geheimes-Gerät-A', vendor: 'brother-ql', host: '10.0.0.50', port: 9100 },
+      { id: 51, name: 'Geheimes-Gerät-B', vendor: 'zebra-zpl', host: '10.0.0.51', port: 9100 },
+    ];
+    const client = fakeClient();
+    const poller = new PrinterPoller({ db, env, group, legs, client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+
+    poller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    vi.setSystemTime(new Date('2026-01-05T10:05:30'));
+    await vi.advanceTimersByTimeAsync(30_000);
+    vi.setSystemTime(new Date('2026-01-05T10:10:30'));
+    await vi.advanceTimersByTimeAsync(DEFAULT_APP_CONFIG.pollIdleMs);
+
+    // Jeder Aufruf an den ChurchTools-Client trägt ausschliesslich Gruppen-Werte.
+    for (const call of client.activatePrinter.mock.calls) {
+      expect(call).toEqual([group.hostname, group.name]);
+      for (const leg of legs) {
+        expect(call).not.toContain(leg.host);
+        expect(call).not.toContain(leg.name === group.name ? '__never__' : leg.name);
+      }
+    }
+    for (const call of client.hidePrinter.mock.calls) {
+      expect(call).toEqual([group.hostname]);
+    }
+    for (const call of client.getNextPrinterJob.mock.calls) {
+      expect(call).toEqual([group.hostname]);
+    }
+
+    poller.stop();
+  });
+});
