@@ -159,6 +159,34 @@ describe('POST /api/printer-groups/:id/legs', () => {
     const legs = db.select().from(printers).where(eq(printers.groupId, group!.id)).all();
     expect(legs).toHaveLength(2);
   });
+
+  it('rejects an unknown layoutIds entry', async () => {
+    const [group] = db.insert(printerGroups).values({ name: 'A', hostname: 'A1' }).returning().all();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/printer-groups/${group!.id}/legs`,
+      ...authed(),
+      payload: { name: 'B', vendor: 'zebra-zpl', host: '10.0.0.2', layoutIds: [999999] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('Unbekannte Etiketten-Layout-ID');
+  });
+
+  it('rejects a layoutId that is already assigned to a different printer', async () => {
+    const [group] = db.insert(printerGroups).values({ name: 'A', hostname: 'A1' }).returning().all();
+    const [leg] = db.insert(printers).values({ groupId: group!.id, name: 'A', vendor: 'brother-ql', host: '10.0.0.1' }).returning().all();
+    const [layout] = db.insert(labelLayouts).values({ name: 'Belegt', ctTypeKey: 'child', printerId: leg!.id }).returning().all();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/printer-groups/${group!.id}/legs`,
+      ...authed(),
+      payload: { name: 'B', vendor: 'zebra-zpl', host: '10.0.0.2', layoutIds: [layout!.id] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('Layout "Belegt" ist bereits einem Drucker zugeordnet');
+  });
 });
 
 describe('DELETE /api/printer-groups/:id', () => {

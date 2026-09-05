@@ -37,6 +37,15 @@ function validateActiveTimes(mode: string | undefined, expr: string | undefined)
   }
 }
 
+function validateLayoutAssignment(app: FastifyInstance, layoutIds: number[]): string | null {
+  if (layoutIds.length === 0) return null;
+  const foundLayouts = app.db.select().from(labelLayouts).where(inArray(labelLayouts.id, layoutIds)).all();
+  if (foundLayouts.length !== layoutIds.length) return 'Unbekannte Etiketten-Layout-ID';
+  const alreadyAssigned = foundLayouts.find((l) => l.printerId !== null);
+  if (alreadyAssigned) return `Layout "${alreadyAssigned.name}" ist bereits einem Drucker zugeordnet`;
+  return null;
+}
+
 function legsWithRoutes(app: FastifyInstance, groupId: number) {
   return app.db
     .select()
@@ -85,13 +94,8 @@ export async function registerPrinterGroupRoutes(app: FastifyInstance) {
     const existing = app.db.select().from(printerGroups).where(eq(printerGroups.hostname, parsed.data.hostname)).get();
     if (existing) return reply.code(400).send({ error: `Hostname „${parsed.data.hostname}" wird bereits verwendet` });
 
-    const requestedLayoutIds = parsed.data.legs.flatMap((leg) => leg.layoutIds ?? []);
-    if (requestedLayoutIds.length > 0) {
-      const foundLayouts = app.db.select().from(labelLayouts).where(inArray(labelLayouts.id, requestedLayoutIds)).all();
-      if (foundLayouts.length !== requestedLayoutIds.length) return reply.code(400).send({ error: 'Unbekannte Etiketten-Layout-ID' });
-      const alreadyAssigned = foundLayouts.find((l) => l.printerId !== null);
-      if (alreadyAssigned) return reply.code(400).send({ error: `Layout "${alreadyAssigned.name}" ist bereits einem Drucker zugeordnet` });
-    }
+    const layoutError = validateLayoutAssignment(app, parsed.data.legs.flatMap((leg) => leg.layoutIds ?? []));
+    if (layoutError) return reply.code(400).send({ error: layoutError });
 
     const { legs, ...groupFields } = parsed.data;
     const [group] = app.db.insert(printerGroups).values(groupFields).returning().all();
@@ -115,6 +119,9 @@ export async function registerPrinterGroupRoutes(app: FastifyInstance) {
 
     const parsed = legInputSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Ungültige Eingabe' });
+
+    const layoutError = validateLayoutAssignment(app, parsed.data.layoutIds ?? []);
+    if (layoutError) return reply.code(400).send({ error: layoutError });
 
     const { layoutIds, ...legFields } = parsed.data;
     const [leg] = app.db.insert(printers).values({ ...legFields, groupId }).returning().all();
