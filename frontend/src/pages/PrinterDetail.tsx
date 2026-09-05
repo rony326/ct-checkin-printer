@@ -13,14 +13,18 @@ export function PrinterDetail() {
   const [saving, setSaving] = useState(false);
 
   async function load() {
-    const [groupRes, mediaRes, layoutsRes] = await Promise.all([
-      api.get<PrinterGroupDetail>(`/api/printer-groups/${id}`),
-      api.get<MediaType[]>('/api/media-types'),
-      api.get<LabelLayout[]>('/api/label-layouts'),
-    ]);
-    setGroup(groupRes);
-    setMediaTypes(mediaRes);
-    setAllLayouts(layoutsRes);
+    try {
+      const [groupRes, mediaRes, layoutsRes] = await Promise.all([
+        api.get<PrinterGroupDetail>(`/api/printer-groups/${id}`),
+        api.get<MediaType[]>('/api/media-types'),
+        api.get<LabelLayout[]>('/api/label-layouts'),
+      ]);
+      setGroup(groupRes);
+      setMediaTypes(mediaRes);
+      setAllLayouts(layoutsRes);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Laden fehlgeschlagen');
+    }
   }
 
   useEffect(() => {
@@ -54,8 +58,12 @@ export function PrinterDetail() {
   }
 
   async function handleDeleteGroup() {
-    await api.delete(`/api/printer-groups/${id}`);
-    navigate('/printers');
+    try {
+      await api.delete(`/api/printer-groups/${id}`);
+      navigate('/printers');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Löschen fehlgeschlagen');
+    }
   }
 
   async function updateLeg(legId: number, patch: { name?: string; vendor?: Vendor; host?: string; port?: number; mediaId?: number | null }) {
@@ -95,14 +103,22 @@ export function PrinterDetail() {
   }
 
   async function unassignLayout(layoutId: number) {
-    await api.put(`/api/label-layouts/${layoutId}`, { printerId: null });
-    await load();
+    try {
+      await api.put(`/api/label-layouts/${layoutId}`, { printerId: null });
+      await load();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Zuordnung konnte nicht aufgehoben werden');
+    }
   }
 
   async function toggleAlso(layout: LabelLayoutWithAlso, alsoLayoutId: number, checked: boolean) {
-    const next = checked ? [...layout.alsoLayoutIds, alsoLayoutId] : layout.alsoLayoutIds.filter((x) => x !== alsoLayoutId);
-    await api.put(`/api/label-layouts/${layout.id}`, { alsoLayoutIds: next });
-    await load();
+    try {
+      const next = checked ? [...layout.alsoLayoutIds, alsoLayoutId] : layout.alsoLayoutIds.filter((x) => x !== alsoLayoutId);
+      await api.put(`/api/label-layouts/${layout.id}`, { alsoLayoutIds: next });
+      await load();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Änderung konnte nicht gespeichert werden');
+    }
   }
 
   if (!group) return null;

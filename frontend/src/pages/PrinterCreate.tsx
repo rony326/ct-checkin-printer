@@ -25,7 +25,10 @@ export function PrinterCreate() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api.get<LabelLayout[]>('/api/label-layouts').then((all) => setUnassignedLayouts(all.filter((l) => l.printerId === null)));
+    api
+      .get<LabelLayout[]>('/api/label-layouts')
+      .then((all) => setUnassignedLayouts(all.filter((l) => l.printerId === null)))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Layouts konnten nicht geladen werden'));
   }, []);
 
   function chooseMode(next: Mode) {

@@ -6,9 +6,16 @@ import type { PrinterGroup } from '../types.js';
 export function PrinterList() {
   const navigate = useNavigate();
   const [groups, setGroups] = useState<PrinterGroup[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function load() {
-    setGroups(await api.get<PrinterGroup[]>('/api/printer-groups'));
+    try {
+      const res = await api.get<PrinterGroup[]>('/api/printer-groups');
+      setError(null);
+      setGroups(res);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Laden fehlgeschlagen');
+    }
   }
 
   useEffect(() => {
@@ -25,6 +32,7 @@ export function PrinterList() {
       </div>
 
       <div style={{ padding: '1.5rem', maxWidth: 900 }}>
+        {error && <p className="error-text">{error}</p>}
         {groups === null ? (
           <p className="hint">Lädt…</p>
         ) : groups.length === 0 ? (
