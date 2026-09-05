@@ -3,7 +3,7 @@ import { createDb } from './client.js';
 import { loadEnv } from '../env.js';
 
 const env = loadEnv();
-const db = createDb(env.DB_PATH);
+const db = createDb(env.DB_PATH, { foreignKeys: false });
 
 migrate(db, { migrationsFolder: './migrations' });
 

@@ -6,10 +6,10 @@ import * as schema from './schema.js';
 
 export type Db = ReturnType<typeof createDb>;
 
-export function createDb(dbPath: string) {
+export function createDb(dbPath: string, options: { foreignKeys?: boolean } = {}) {
   mkdirSync(dirname(dbPath), { recursive: true });
   const sqlite = new Database(dbPath);
   sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
+  sqlite.pragma(`foreign_keys = ${options.foreignKeys === false ? 'OFF' : 'ON'}`);
   return drizzle(sqlite, { schema });
 }
