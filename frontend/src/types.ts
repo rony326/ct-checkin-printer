@@ -7,11 +7,11 @@ export type Rotate = '0' | '90' | '180' | '270';
 export type Vendor = 'brother-ql' | 'zebra-zpl';
 
 export type LabelElement =
-  | { id: string; type: 'text'; xMm: number; yMm: number; field: TextFieldPath; fontSize: number; bold: boolean; align: Align; fontId?: number; prefix?: string }
-  | { id: string; type: 'static'; xMm: number; yMm: number; value: string; fontSize: number; bold: boolean; align: Align; fontId?: number }
-  | { id: string; type: 'logo'; xMm: number; yMm: number; logoId: number; heightMm: number }
-  | { id: string; type: 'qr'; xMm: number; yMm: number; content: QrContentPath; sizeMm: number }
-  | { id: string; type: 'line'; xMm: number; yMm: number; widthMm: number; thicknessMm: number };
+  | { id: string; type: 'text'; xMm: number; yMm: number; field: TextFieldPath; fontSize: number; bold: boolean; align: Align; fontId?: number; prefix?: string; rotate?: Rotate }
+  | { id: string; type: 'static'; xMm: number; yMm: number; value: string; fontSize: number; bold: boolean; align: Align; fontId?: number; rotate?: Rotate }
+  | { id: string; type: 'logo'; xMm: number; yMm: number; logoId: number; heightMm: number; rotate?: Rotate }
+  | { id: string; type: 'qr'; xMm: number; yMm: number; content: QrContentPath; sizeMm: number; rotate?: Rotate }
+  | { id: string; type: 'line'; xMm: number; yMm: number; widthMm: number; thicknessMm: number; rotate?: Rotate };
 
 export type LabelElementType = LabelElement['type'];
 

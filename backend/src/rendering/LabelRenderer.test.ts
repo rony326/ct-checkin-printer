@@ -125,6 +125,40 @@ describe('renderLabel — Zeichnen', () => {
     expect([png.data[idx], png.data[idx + 1], png.data[idx + 2]]).toEqual([0, 0, 0]);
   });
 
+  it('dreht ein Element um seinen Anker-Punkt statt um den Canvas-Ursprung (rotate: "90")', async () => {
+    const elements: LabelElement[] = [{ id: '1', type: 'line', xMm: 5, yMm: 10, widthMm: 40, thicknessMm: 1, rotate: '90' }];
+    const bitmap = await renderLabel(elements, DIE_CUT_MEDIA, CONTEXT, { dpi: 300 });
+    const png = decode(bitmap);
+    const anchorXPx = Math.round((5 / 25.4) * 300);
+    const anchorYPx = Math.round((10 / 25.4) * 300);
+
+    // Bei 0° läge dieser Punkt (Anker + 5px nach rechts) auf dem Balken (siehe Test oben) — nach 90°-Drehung nicht mehr.
+    const oldSpotIdx = (png.width * anchorYPx + (anchorXPx + 5)) * 4;
+    expect([png.data[oldSpotIdx], png.data[oldSpotIdx + 1], png.data[oldSpotIdx + 2]]).toEqual([255, 255, 255]);
+
+    // Stattdessen verläuft der Balken nach der Drehung ab dem Anker nach unten statt nach rechts — die Dicke liegt
+    // dabei (wie schon bei 0°: Anker ist die unrotierte Ecke der Fläche) links vom Anker, siehe Kommentar bei withRotation.
+    const newSpotIdx = (png.width * (anchorYPx + 5) + (anchorXPx - 5)) * 4;
+    expect([png.data[newSpotIdx], png.data[newSpotIdx + 1], png.data[newSpotIdx + 2]]).toEqual([0, 0, 0]);
+  });
+
+  it('dreht ein Element um 180° auf die Gegenseite seines Ankers', async () => {
+    const elements: LabelElement[] = [{ id: '1', type: 'line', xMm: 10, yMm: 10, widthMm: 40, thicknessMm: 1, rotate: '180' }];
+    const bitmap = await renderLabel(elements, DIE_CUT_MEDIA, CONTEXT, { dpi: 300 });
+    const png = decode(bitmap);
+    const anchorXPx = Math.round((10 / 25.4) * 300);
+    const anchorYPx = Math.round((10 / 25.4) * 300);
+
+    // Bei 0° läge der Punkt rechts vom Anker auf dem Balken — nach 180°-Drehung nicht mehr.
+    const oldSpotIdx = (png.width * anchorYPx + (anchorXPx + 5)) * 4;
+    expect([png.data[oldSpotIdx], png.data[oldSpotIdx + 1], png.data[oldSpotIdx + 2]]).toEqual([255, 255, 255]);
+
+    // Stattdessen verläuft der Balken nach der Drehung ab dem Anker nach links, und die Dicke liegt jetzt oberhalb
+    // (statt unterhalb) des Ankers.
+    const newSpotIdx = (png.width * (anchorYPx - 5) + (anchorXPx - 5)) * 4;
+    expect([png.data[newSpotIdx], png.data[newSpotIdx + 1], png.data[newSpotIdx + 2]]).toEqual([0, 0, 0]);
+  });
+
   it('zeichnet einen QR-Code für qr:hash, wenn id+code vorhanden sind', async () => {
     const elements: LabelElement[] = [{ id: '1', type: 'qr', xMm: 5, yMm: 5, content: 'qr:hash', sizeMm: 20 }];
     const bitmap = await renderLabel(elements, DIE_CUT_MEDIA, CONTEXT, { dpi: 300 });

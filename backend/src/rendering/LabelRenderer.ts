@@ -24,6 +24,7 @@ import { mmToPx } from './dimensions.js';
 const LINE_HEIGHT_FACTOR = 1.3;
 const DEFAULT_BOTTOM_MARGIN_MM = 2;
 const MIN_CANVAS_HEIGHT_MM = 10;
+const ROTATE_RADIANS: Record<'0' | '90' | '180' | '270', number> = { '0': 0, '90': Math.PI / 2, '180': Math.PI, '270': (3 * Math.PI) / 2 };
 export const FALLBACK_REGULAR_FAMILY = 'CtCheckinFallback';
 export const FALLBACK_BOLD_FAMILY = 'CtCheckinFallback-Bold';
 
@@ -119,7 +120,7 @@ function computeContentHeightMm(elements: LabelElement[], ctx: RenderContext, dp
 function drawTextLines(
   canvasCtx: SKRSContext2D,
   lines: string[],
-  el: { xMm: number; yMm: number; fontSize: number; bold: boolean; align: 'left' | 'center' | 'right'; fontId?: number },
+  el: { xMm: number; yMm: number; fontSize: number; bold: boolean; align: 'left' | 'center' | 'right'; fontId?: number; rotate?: '0' | '90' | '180' | '270' },
   dpi: number,
   fonts: Record<number, string>,
 ): void {
@@ -136,12 +137,16 @@ function drawTextLines(
   canvasCtx.fillStyle = 'black';
 
   const xPx = mmToPx(el.xMm, dpi);
-  let yPx = mmToPx(el.yMm, dpi);
+  const yPx = mmToPx(el.yMm, dpi);
   const lineHeightPx = el.fontSize * LINE_HEIGHT_FACTOR;
-  for (const line of lines) {
-    canvasCtx.fillText(line, xPx, yPx);
-    yPx += lineHeightPx;
-  }
+  // Der ganze mehrzeilige Block dreht sich als Einheit um den Anker der ersten Zeile, nicht jede Zeile für sich.
+  withRotation(canvasCtx, xPx, yPx, el.rotate, () => {
+    let lineYPx = yPx;
+    for (const line of lines) {
+      canvasCtx.fillText(line, xPx, lineYPx);
+      lineYPx += lineHeightPx;
+    }
+  });
 }
 
 function resolveQrContent(el: Extract<LabelElement, { type: 'qr' }>, ctx: RenderContext): string | null {
@@ -158,7 +163,9 @@ async function drawQr(canvasCtx: SKRSContext2D, el: Extract<LabelElement, { type
   const sizePx = mmToPx(el.sizeMm, dpi);
   const png = await QRCode.toBuffer(content, { type: 'png', margin: 0, width: sizePx, errorCorrectionLevel: 'M' });
   const img = await loadImage(png);
-  canvasCtx.drawImage(img, mmToPx(el.xMm, dpi), mmToPx(el.yMm, dpi), sizePx, sizePx);
+  const xPx = mmToPx(el.xMm, dpi);
+  const yPx = mmToPx(el.yMm, dpi);
+  withRotation(canvasCtx, xPx, yPx, el.rotate, () => canvasCtx.drawImage(img, xPx, yPx, sizePx, sizePx));
 }
 
 async function drawLogo(canvasCtx: SKRSContext2D, el: Extract<LabelElement, { type: 'logo' }>, logos: Record<number, Buffer>, dpi: number): Promise<void> {
@@ -168,12 +175,39 @@ async function drawLogo(canvasCtx: SKRSContext2D, el: Extract<LabelElement, { ty
   const img = await loadImage(bytes);
   const heightPx = mmToPx(el.heightMm, dpi);
   const widthPx = Math.round(heightPx * (img.width / img.height));
-  canvasCtx.drawImage(img, mmToPx(el.xMm, dpi), mmToPx(el.yMm, dpi), widthPx, heightPx);
+  const xPx = mmToPx(el.xMm, dpi);
+  const yPx = mmToPx(el.yMm, dpi);
+  withRotation(canvasCtx, xPx, yPx, el.rotate, () => canvasCtx.drawImage(img, xPx, yPx, widthPx, heightPx));
 }
 
 function drawLine(canvasCtx: SKRSContext2D, el: Extract<LabelElement, { type: 'line' }>, dpi: number): void {
   canvasCtx.fillStyle = 'black';
-  canvasCtx.fillRect(mmToPx(el.xMm, dpi), mmToPx(el.yMm, dpi), mmToPx(el.widthMm, dpi), Math.max(1, mmToPx(el.thicknessMm, dpi)));
+  const xPx = mmToPx(el.xMm, dpi);
+  const yPx = mmToPx(el.yMm, dpi);
+  withRotation(canvasCtx, xPx, yPx, el.rotate, () =>
+    canvasCtx.fillRect(xPx, yPx, mmToPx(el.widthMm, dpi), Math.max(1, mmToPx(el.thicknessMm, dpi))),
+  );
+}
+
+/**
+ * Dreht die Zeichnung eines Elements um seinen eigenen Anker-Punkt (`xMm`/`yMm` in Bildschirm-/Druck-Pixel).
+ * Der Trick, um "um Punkt P drehen" statt "um den Ursprung drehen" zu erreichen: zum Anker verschieben, drehen,
+ * um denselben Betrag zurückverschieben — danach zeichnet `draw()` mit exakt denselben absoluten Pixel-Koordinaten
+ * wie ohne Rotation, landet aber gedreht auf dem Canvas. Editor-Canvas (Konva `rotation`-Prop) nutzt dieselbe
+ * Dreh-Konvention (im Uhrzeigersinn), beide bauen auf der HTML5-Canvas-2D-API auf.
+ */
+function withRotation(canvasCtx: SKRSContext2D, anchorXPx: number, anchorYPx: number, rotate: '0' | '90' | '180' | '270' | undefined, draw: () => void): void {
+  const radians = ROTATE_RADIANS[rotate ?? '0'];
+  if (radians === 0) {
+    draw();
+    return;
+  }
+  canvasCtx.save();
+  canvasCtx.translate(anchorXPx, anchorYPx);
+  canvasCtx.rotate(radians);
+  canvasCtx.translate(-anchorXPx, -anchorYPx);
+  draw();
+  canvasCtx.restore();
 }
 
 export async function renderLabel(

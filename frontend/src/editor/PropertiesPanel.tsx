@@ -1,5 +1,5 @@
 import type { ChangeEvent } from 'react';
-import type { Align, FontEntry, LabelElement, LogoEntry, QrContentPath, TextFieldPath, VariableDefs } from '../types.js';
+import type { Align, FontEntry, LabelElement, LogoEntry, QrContentPath, Rotate, TextFieldPath, VariableDefs } from '../types.js';
 
 interface Props {
   element: LabelElement | null;
@@ -37,6 +37,18 @@ export function PropertiesPanel({ element, variables, fonts, logos, onChange, on
     </div>
   );
 
+  const rotateField = (
+    <div className="field">
+      <label>Drehung</label>
+      <select value={element.rotate ?? '0'} onChange={(e) => onChange({ ...element, rotate: e.target.value as Rotate })}>
+        <option value="0">Normal (0°)</option>
+        <option value="90">90°</option>
+        <option value="180">180°</option>
+        <option value="270">270°</option>
+      </select>
+    </div>
+  );
+
   return (
     <aside className="panel" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
@@ -47,6 +59,7 @@ export function PropertiesPanel({ element, variables, fonts, logos, onChange, on
       </div>
 
       {positionFields}
+      {rotateField}
 
       {(element.type === 'text' || element.type === 'static') && (
         <>

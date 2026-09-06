@@ -26,6 +26,7 @@ const labelElementSchema = z.discriminatedUnion('type', [
     align: alignEnum,
     fontId: z.number().optional(),
     prefix: z.string().optional(),
+    rotate: rotateEnum.optional(),
   }),
   z.object({
     id: z.string(),
@@ -37,10 +38,11 @@ const labelElementSchema = z.discriminatedUnion('type', [
     bold: z.boolean(),
     align: alignEnum,
     fontId: z.number().optional(),
+    rotate: rotateEnum.optional(),
   }),
-  z.object({ id: z.string(), type: z.literal('logo'), xMm: z.number(), yMm: z.number(), logoId: z.number(), heightMm: z.number().positive() }),
-  z.object({ id: z.string(), type: z.literal('qr'), xMm: z.number(), yMm: z.number(), content: z.enum(['qr:hash', 'qr:personId']), sizeMm: z.number().positive() }),
-  z.object({ id: z.string(), type: z.literal('line'), xMm: z.number(), yMm: z.number(), widthMm: z.number().positive(), thicknessMm: z.number().positive() }),
+  z.object({ id: z.string(), type: z.literal('logo'), xMm: z.number(), yMm: z.number(), logoId: z.number(), heightMm: z.number().positive(), rotate: rotateEnum.optional() }),
+  z.object({ id: z.string(), type: z.literal('qr'), xMm: z.number(), yMm: z.number(), content: z.enum(['qr:hash', 'qr:personId']), sizeMm: z.number().positive(), rotate: rotateEnum.optional() }),
+  z.object({ id: z.string(), type: z.literal('line'), xMm: z.number(), yMm: z.number(), widthMm: z.number().positive(), thicknessMm: z.number().positive(), rotate: rotateEnum.optional() }),
 ]);
 
 const createLayoutSchema = z.object({
