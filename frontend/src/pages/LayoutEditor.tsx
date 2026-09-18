@@ -6,6 +6,28 @@ import { PropertiesPanel } from '../editor/PropertiesPanel.js';
 import { Toolbar } from '../editor/Toolbar.js';
 import type { FontEntry, LabelElement, LabelElementType, LabelLayout, LogoEntry, MediaType, VariableDefs } from '../types.js';
 
+/**
+ * `crypto.randomUUID()` existiert nur in sicheren Kontexten (HTTPS oder
+ * localhost) — bei einem Self-Hosted-Zugriff per HTTP übers lokale Netzwerk
+ * (üblicher Fall bei diesem Tool) fehlt die Methode, `crypto` selbst aber
+ * nicht. Deshalb hier über `crypto.getRandomValues()` nachgebaut, das ohne
+ * sicheren Kontext funktioniert; das Format muss kein echtes UUID sein, `id`
+ * ist nur ein opaker Schlüssel innerhalb eines Layouts.
+ */
+function generateElementId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 const DEFAULT_ELEMENT_BY_TYPE: Record<LabelElementType, (id: string) => LabelElement> = {
   text: (id) => ({ id, type: 'text', xMm: 5, yMm: 5, field: 'person.name', fontSize: 40, bold: false, align: 'left' }),
   static: (id) => ({ id, type: 'static', xMm: 5, yMm: 5, value: 'Text', fontSize: 32, bold: false, align: 'left' }),
@@ -99,7 +121,7 @@ export function LayoutEditor() {
   }, []);
 
   function addElement(type: LabelElementType) {
-    const newElement = DEFAULT_ELEMENT_BY_TYPE[type](crypto.randomUUID());
+    const newElement = DEFAULT_ELEMENT_BY_TYPE[type](generateElementId());
     setElements((prev) => [...prev, newElement]);
     setSelectedId(newElement.id);
   }
