@@ -218,8 +218,17 @@ export async function renderLabel(
 ): Promise<RenderedBitmap> {
   const { dpi, logos = {}, fonts = {}, bottomMarginMm = DEFAULT_BOTTOM_MARGIN_MM } = options;
 
-  const widthPx = mmToPx(media.widthMm, dpi);
-  const heightMm = Math.max(media.heightMm ?? computeContentHeightMm(elements, context, dpi, bottomMarginMm), MIN_CANVAS_HEIGHT_MM);
+  // Bei Die-Cut-Medien erwartet der Brother-Raster-Helper (`brother_ql.conversion.convert`)
+  // ein Bitmap in EXAKT den festen Pixelmassen aus `ALL_LABELS`/`dots_printable` — das ist
+  // `media.printableAreaMm`, nicht die nominale Etikettengrösse (`widthMm`/`heightMm`
+  // beinhaltet den nicht bedruckbaren Rand). Bei Endlosmaterial ist dieser Check lax
+  // (nur die Breite zählt, die Länge ergibt sich aus dem Inhalt), daher dort weiterhin
+  // die nominale Breite + berechnete Inhaltshöhe.
+  const widthMm = media.dieCut ? media.printableAreaMm.width : media.widthMm;
+  const widthPx = mmToPx(widthMm, dpi);
+  const heightMm = media.dieCut
+    ? media.printableAreaMm.height
+    : Math.max(media.heightMm ?? computeContentHeightMm(elements, context, dpi, bottomMarginMm), MIN_CANVAS_HEIGHT_MM);
   const heightPx = mmToPx(heightMm, dpi);
 
   const canvas = createCanvas(widthPx, heightPx);

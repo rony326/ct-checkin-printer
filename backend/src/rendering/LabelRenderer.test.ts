@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BUNDLED_FONT_PATH = path.join(__dirname, '../../assets/fonts/DejaVuSans-Bold.ttf');
 import type { RenderContext } from '../template/variables.js';
 import { renderLabel } from './LabelRenderer.js';
+import { BROTHER_MEDIA } from '../adapters/printer/media/brotherMedia.js';
 
 const DIE_CUT_MEDIA: MediaDefinition = {
   id: '60x86',
@@ -52,11 +53,18 @@ function hasNonWhitePixel(png: PNG, x0: number, y0: number, x1: number, y1: numb
 }
 
 describe('renderLabel — Canvas-Grösse', () => {
-  it('nutzt bei Die-Cut-Medien die feste Media-Grösse in Pixeln (300dpi)', async () => {
+  it('nutzt bei Die-Cut-Medien die printableAreaMm, NICHT die nominale Etikettengrösse (sonst "Bad image dimensions" im Brother-Raster-Helper, siehe brother_ql ALL_LABELS)', async () => {
     const bitmap = await renderLabel([], DIE_CUT_MEDIA, CONTEXT, { dpi: 300 });
-    // 60mm/25.4*300 = 708.66 -> gerundet 709; 86mm -> 1016
-    expect(bitmap.widthPx).toBe(709);
-    expect(bitmap.heightPx).toBe(1016);
+    // printableAreaMm 58×84mm/25.4*300 -> gerundet 685×992, NICHT die nominalen 60×86mm (709×1016)
+    expect(bitmap.widthPx).toBe(685);
+    expect(bitmap.heightPx).toBe(992);
+  });
+
+  it('trifft für alle Brother-Die-Cut-Medien exakt die dots_printable-Grösse aus brother_ql ALL_LABELS (Produktionsbug: DK-11234 60x86 kam als 709×1028 statt 672×954 an, "Bad image dimensions")', async () => {
+    const dk11234 = BROTHER_MEDIA.find((m) => m.id === '60x86')!;
+    const bitmap = await renderLabel([], dk11234, CONTEXT, { dpi: 300 });
+    expect(bitmap.widthPx).toBe(672);
+    expect(bitmap.heightPx).toBe(954);
   });
 
   it('berechnet bei Endlosmedien die Höhe aus dem Inhalt', async () => {
