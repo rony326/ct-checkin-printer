@@ -85,27 +85,47 @@ export abstract class BaseLabelPrinterAdapter implements Omit<LabelPrinterAdapte
   getStatusFromHttp?(): Promise<PrinterStatusResult | null>;
   detectMedia?(): Promise<MediaDefinition | null>;
 
+  /**
+   * Fragt Druckkanal + HTTP GLEICHZEITIG ab und nimmt, welche Quelle zuerst
+   * erfolgreich antwortet — nicht mehr strikt nacheinander (Druckkanal, dann
+   * bei Fehler HTTP). Grund: manche Drucker/Netzwerke beantworten die rohe
+   * ESC-i-S-Statusabfrage über den Druckkanal gar nicht, liefern aber über
+   * HTTP zuverlässig — das Sequenziell-Warten hat dann JEDEN Druckversuch um
+   * den vollen printerTimeoutMs (Default 5s) verzögert, obwohl die schnelle
+   * Quelle die ganze Zeit verfügbar war (siehe Produktions-Log: getStatus()
+   * brauchte konstant ~5.2s = 5000ms Timeout + ~200-300ms echter
+   * HTTP-Antwortzeit). Ein Fehlschlag einer Quelle darf die andere, noch
+   * laufende NICHT verdrängen — erst wenn ALLE Quellen erfolglos sind, ist
+   * das Ergebnis UNKNOWN.
+   */
   async getStatus(): Promise<PrinterStatusResult> {
-    try {
-      const primary = await this.getStatusFromPrintChannel();
-      if (primary) return primary;
-    } catch {
-      // primäre Quelle nicht verwertbar — Fallback versuchen
-    }
-    if (this.getStatusFromHttp) {
-      try {
-        const fallback = await this.getStatusFromHttp();
-        if (fallback) return fallback;
-      } catch {
-        // auch Fallback nicht verwertbar
+    const sources = [this.getStatusFromPrintChannel()];
+    if (this.getStatusFromHttp) sources.push(this.getStatusFromHttp());
+
+    return new Promise((resolve) => {
+      let pending = sources.length;
+      let settled = false;
+      for (const source of sources) {
+        source
+          .catch(() => null)
+          .then((result) => {
+            pending--;
+            if (settled) return;
+            if (result) {
+              settled = true;
+              resolve(result);
+            } else if (pending === 0) {
+              settled = true;
+              resolve({
+                status: PrinterStatus.UNKNOWN,
+                humanMessage: 'Druckerstatus konnte nicht ermittelt werden.',
+                source: 'print-channel',
+                timestamp: new Date(),
+              });
+            }
+          });
       }
-    }
-    return {
-      status: PrinterStatus.UNKNOWN,
-      humanMessage: 'Druckerstatus konnte nicht ermittelt werden.',
-      source: 'print-channel',
-      timestamp: new Date(),
-    };
+    });
   }
 }
 
