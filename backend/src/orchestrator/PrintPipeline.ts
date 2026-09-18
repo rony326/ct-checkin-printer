@@ -20,6 +20,7 @@ export interface PrintPipelineDeps {
   db: Db;
   env: Env;
   adapters: { getAdapter(printer: AdapterRegistryPrinter): Promise<LabelPrinterAdapter> };
+  logger?: Pick<Console, 'info' | 'warn' | 'error'>;
 }
 
 export interface ProcessIncomingJobResult {
@@ -43,7 +44,11 @@ interface LayoutPrintOutcome {
  * "Bewusste Abweichungen von v1").
  */
 export class PrintPipeline {
-  constructor(private readonly deps: PrintPipelineDeps) {}
+  private readonly logger: Pick<Console, 'info' | 'warn' | 'error'>;
+
+  constructor(private readonly deps: PrintPipelineDeps) {
+    this.logger = deps.logger ?? console;
+  }
 
   async processIncomingJob(hostname: string, rawData: string, now: () => number = Date.now): Promise<ProcessIncomingJobResult> {
     if (!rawData || !rawData.trim()) return { enriched: false, printed: 0, queued: 0 };
@@ -123,9 +128,17 @@ export class PrintPipeline {
       return this.logAndReturn(layout, parsed, unixTimestampSeconds, targetPrinter.id, { success: false, errorMessage: 'Layout hat keinen Medientyp' });
     }
 
+    const attemptStartedAt = Date.now();
+    this.logger.info(`[print] Start Layout "${layout.name}" -> Drucker "${targetPrinter.name}" (id=${targetPrinter.id}, ${targetPrinter.host}:${targetPrinter.port})`);
+
     const adapter = await this.deps.adapters.getAdapter(targetPrinter);
+    const statusStartedAt = Date.now();
     const status = await adapter.getStatus();
+    this.logger.info(
+      `[print] getStatus() für "${targetPrinter.name}" (id=${targetPrinter.id}) dauerte ${Date.now() - statusStartedAt}ms -> ${status.status} (${status.humanMessage})`,
+    );
     if (status.status !== PrinterStatus.ONLINE) {
+      this.logger.info(`[print] Ende Layout "${layout.name}" -> "${targetPrinter.name}" nach ${Date.now() - attemptStartedAt}ms (nicht ONLINE, wird ggf. in die Queue gelegt)`);
       return this.logAndReturn(layout, parsed, unixTimestampSeconds, targetPrinter.id, { success: false, errorMessage: status.humanMessage });
     }
 
@@ -138,7 +151,10 @@ export class PrintPipeline {
     ]);
     const bitmap = await renderLabel(layout.elementsJson as LabelElement[], media, context, { dpi: VENDOR_DPI[mediaRow.vendor], fonts, logos });
 
+    const printStartedAt = Date.now();
     const printResult = await adapter.printLabel(bitmap, media, { copies: layout.copies, rotate: layout.rotate });
+    this.logger.info(`[print] printLabel() für "${targetPrinter.name}" (id=${targetPrinter.id}) dauerte ${Date.now() - printStartedAt}ms -> ${printResult.success ? 'ok' : printResult.errorMessage}`);
+    this.logger.info(`[print] Ende Layout "${layout.name}" -> "${targetPrinter.name}" nach insgesamt ${Date.now() - attemptStartedAt}ms`);
     if (!printResult.success) {
       return this.logAndReturn(layout, parsed, unixTimestampSeconds, targetPrinter.id, {
         success: false,

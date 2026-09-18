@@ -68,7 +68,7 @@ export class PrintOrchestrator {
   async start(): Promise<void> {
     const config = loadAppConfig(this.db);
     const adapters = new AdapterRegistry({ printerTimeoutMs: config.printerTimeoutMs });
-    const pipeline = new PrintPipeline({ db: this.db, env: this.env, adapters });
+    const pipeline = new PrintPipeline({ db: this.db, env: this.env, adapters, logger: this.logger });
     this.pipeline = pipeline;
 
     this.summaryReportService =
