@@ -20,7 +20,14 @@ export interface BrotherMediaSeed extends MediaDefinition {
 }
 
 const DPI = 300;
-const pxToMm = (px: number) => Math.round((px / DPI) * 25.4 * 10) / 10;
+// Bewusst NICHT auf 0.1mm gerundet: printableAreaMm muss beim Rendern
+// verlustfrei über mmToPx() zurück auf exakt printableWidthPx/-HeightPx
+// führen, damit der Brother-Raster-Helper (dots_printable-Check in
+// brother_ql.conversion.convert) die Bitmap-Grösse akzeptiert. Runden auf
+// 0.1mm reicht dafür NICHT bei jedem Eintrag (Doppelrundung px→mm→px kann
+// ±1px abweichen, siehe Produktionsbug DK-11234/weitere Die-Cut-Formate) —
+// nur die volle Fliesskomma-Präzision rundet exakt zurück.
+const pxToMm = (px: number) => (px / DPI) * 25.4;
 
 function continuous(externalId: string, widthMm: number, printableWidthPx: number, dkPartNumber?: string): BrotherMediaSeed {
   return {

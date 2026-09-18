@@ -20,8 +20,10 @@ export function seedMediaTypes(db: ReturnType<typeof createDb>) {
         name: seed.name,
         widthMm: seed.widthMm,
         heightMm: seed.heightMm,
-        printableWidthMm: Math.round(seed.printableAreaMm.width),
-        printableHeightMm: seed.printableAreaMm.height ? Math.round(seed.printableAreaMm.height) : null,
+        // Nicht runden: muss verlustfrei zurück auf die exakten dots_printable-Pixelmasse
+        // konvertierbar bleiben (siehe schema.ts-Kommentar bei printableWidthMm).
+        printableWidthMm: seed.printableAreaMm.width,
+        printableHeightMm: seed.printableAreaMm.height || null,
         dieCut: seed.dieCut,
       })
       .run();

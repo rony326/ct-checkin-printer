@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 import type { QrContentPath, TextFieldPath } from '../template/variables.js';
 
 const timestamps = {
@@ -53,8 +53,13 @@ export const mediaTypes = sqliteTable('media_types', {
   name: text('name').notNull(),
   widthMm: integer('width_mm').notNull(),
   heightMm: integer('height_mm'), // null = Endlosmaterial
-  printableWidthMm: integer('printable_width_mm').notNull(),
-  printableHeightMm: integer('printable_height_mm'),
+  // real statt integer: muss beim Rendern verlustfrei zurück auf die exakten
+  // dots_printable-Pixelmasse aus brother_ql's ALL_LABELS runden (siehe
+  // brotherMedia.ts) — bei ganzzahligem mm ist dieser Rücktransport nicht
+  // pixelgenau, der Brother-Raster-Helper hat dann mit "Bad image dimensions"
+  // abgelehnt (Produktionsbug, DK-11234 60x86: 672px wurden zu 673px).
+  printableWidthMm: real('printable_width_mm').notNull(),
+  printableHeightMm: real('printable_height_mm'),
   dieCut: integer('die_cut', { mode: 'boolean' }).notNull().default(false),
 });
 

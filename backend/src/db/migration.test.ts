@@ -21,7 +21,9 @@ describe('printer_groups Migration', () => {
     const baselineDir = path.join(tmpDir, 'baseline-migrations');
     const migrationsDir = path.join(import.meta.dirname, '../../migrations');
     const journal = JSON.parse(readFileSync(path.join(migrationsDir, 'meta/_journal.json'), 'utf8'));
-    const baselineEntries = journal.entries.filter((e: { tag: string }) => !e.tag.startsWith('0005_') && !e.tag.startsWith('0006_'));
+    const baselineEntries = journal.entries.filter(
+      (e: { tag: string }) => !e.tag.startsWith('0005_') && !e.tag.startsWith('0006_') && !e.tag.startsWith('0007_'),
+    );
     cpSync(migrationsDir, baselineDir, { recursive: true });
     for (const entry of journal.entries) {
       if (!baselineEntries.includes(entry)) rmSync(path.join(baselineDir, `${entry.tag}.sql`), { force: true });
