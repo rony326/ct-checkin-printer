@@ -218,7 +218,7 @@ export class PrinterPoller {
   private async onModeChange(prevMode: Mode | null, newMode: Mode): Promise<void> {
     const { hostname } = this.deps.group;
 
-    if (prevMode === 'sleeping' && newMode !== 'sleeping') {
+    if ((prevMode === 'sleeping' || prevMode === null) && newMode !== 'sleeping') {
       this.windowOpenedAt = Date.now();
       await this.deps.client.ensureLogin();
       await this.activateWithCheck();

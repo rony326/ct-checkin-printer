@@ -57,6 +57,18 @@ afterEach(() => {
 });
 
 describe('PrinterPoller idle polling', () => {
+  it('logs in and activates before the first poll when the group is already active at startup (lastMode starts as null, not "sleeping")', async () => {
+    const client = fakeClient();
+    const poller = new PrinterPoller({ db, env, group: BASE_GROUP, legs: [BASE_LEG], client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+
+    poller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.ensureLogin).toHaveBeenCalledTimes(1);
+    expect(client.activatePrinter).toHaveBeenCalledWith('B1', 'Empfang');
+
+    poller.stop();
+  });
+
   it('polls immediately on start and again after the idle interval when there is no job', async () => {
     const client = fakeClient();
     const poller = new PrinterPoller({ db, env, group: BASE_GROUP, legs: [BASE_LEG], client, pipeline: fakePipeline(), adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
