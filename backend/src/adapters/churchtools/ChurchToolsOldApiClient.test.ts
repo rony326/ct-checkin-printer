@@ -16,7 +16,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown, extraHeade
 }
 
 interface FakeChurchToolsOptions {
-  jobData?: string | null;
+  jobData?: unknown;
   requireCookie?: boolean;
   failHidePrinter?: string;
 }
@@ -114,10 +114,10 @@ describe('ChurchToolsOldApiClient (gegen einen simulierten ChurchTools-HTTP-Serv
     const result = await client.getNextPrinterJob('B2');
 
     expect(result.success).toBe(true);
-    expect(result.data).toBeNull();
+    expect(result.data).toEqual([]);
   });
 
-  it('baut den oldApi-Request-Body korrekt (func + ort)', async () => {
+  it('baut den oldApi-Request-Body korrekt (func + ort) und akzeptiert den rohen String direkt als data', async () => {
     const fake = await startFakeChurchTools({ jobData: 'name=Max\nid=123\ncode=AB12' });
     server = fake.server;
     const port = (server.address() as { port: number }).port;
@@ -127,8 +127,52 @@ describe('ChurchToolsOldApiClient (gegen einen simulierten ChurchTools-HTTP-Serv
     const result = await client.getNextPrinterJob('B2');
 
     expect(result.success).toBe(true);
-    expect(result.data).toBe('name=Max\nid=123\ncode=AB12');
+    expect(result.data).toEqual(['name=Max\nid=123\ncode=AB12']);
     expect(fake.oldApiCalls).toContainEqual({ func: 'getNextPrinterJob', ort: 'B2' });
+  });
+
+  it('extrahiert das Textfeld, wenn CT einen einzelnen Job als Objekt mit .data liefert (reale Form laut v1)', async () => {
+    const fake = await startFakeChurchTools({ jobData: { data: 'name=Max\nid=123\ncode=AB12\ntype=child', ort: 'B2' } });
+    server = fake.server;
+    const port = (server.address() as { port: number }).port;
+
+    const client = makeClient(`http://127.0.0.1:${port}`);
+    await client.testLogin();
+    const result = await client.getNextPrinterJob('B2');
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual(['name=Max\nid=123\ncode=AB12\ntype=child']);
+  });
+
+  it('extrahiert alle Jobs, wenn CT bei mehreren gleichzeitigen Check-ins ein Array von Job-Objekten liefert', async () => {
+    const fake = await startFakeChurchTools({
+      jobData: [
+        { data: 'name=Max\nid=1\ncode=AB\ntype=child' },
+        { data: 'name=Anna\nid=2\ncode=CD\ntype=parent' },
+      ],
+    });
+    server = fake.server;
+    const port = (server.address() as { port: number }).port;
+
+    const client = makeClient(`http://127.0.0.1:${port}`);
+    await client.testLogin();
+    const result = await client.getNextPrinterJob('B2');
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual(['name=Max\nid=1\ncode=AB\ntype=child', 'name=Anna\nid=2\ncode=CD\ntype=parent']);
+  });
+
+  it('behandelt ein leeres Job-Objekt ({}) als "kein Job"', async () => {
+    const fake = await startFakeChurchTools({ jobData: {} });
+    server = fake.server;
+    const port = (server.address() as { port: number }).port;
+
+    const client = makeClient(`http://127.0.0.1:${port}`);
+    await client.testLogin();
+    const result = await client.getNextPrinterJob('B2');
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual([]);
   });
 
   it('activatePrinter sendet ort + bezeichnung', async () => {

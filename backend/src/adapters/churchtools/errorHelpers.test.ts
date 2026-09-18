@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractMessage, extractStatusCode, isEmptyJobData } from './errorHelpers.js';
+import { extractJobTexts, extractMessage, extractStatusCode, isEmptyJobData } from './errorHelpers.js';
 
 describe('extractMessage', () => {
   it('prefers a top-level Error.message', () => {
@@ -48,5 +48,27 @@ describe('isEmptyJobData', () => {
 
   it('treats a non-empty object as non-empty', () => {
     expect(isEmptyJobData({ id: '123' })).toBe(false);
+  });
+});
+
+describe('extractJobTexts', () => {
+  it.each([null, undefined, '', '   ', {}, []])('returns [] for %p', (value) => {
+    expect(extractJobTexts(value)).toEqual([]);
+  });
+
+  it('passes a raw string through unchanged', () => {
+    expect(extractJobTexts('name=Max\nid=123')).toEqual(['name=Max\nid=123']);
+  });
+
+  it('extracts .data from a single job object (the shape CT actually sends)', () => {
+    expect(extractJobTexts({ data: 'name=Max\nid=123', ort: 'B2' })).toEqual(['name=Max\nid=123']);
+  });
+
+  it('extracts .data from every entry when CT sends an array of job objects', () => {
+    expect(extractJobTexts([{ data: 'a=1' }, { data: 'b=2' }])).toEqual(['a=1', 'b=2']);
+  });
+
+  it('drops entries whose .data is missing or blank instead of crashing', () => {
+    expect(extractJobTexts([{ data: 'a=1' }, { ort: 'no-data-field' }, { data: '   ' }])).toEqual(['a=1']);
   });
 });

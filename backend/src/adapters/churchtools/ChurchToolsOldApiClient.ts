@@ -1,7 +1,7 @@
 import ChurchToolsClientModule from '@churchtools/churchtools-client';
 import { wrapper } from 'axios-cookiejar-support';
 import { CookieJar } from 'tough-cookie';
-import { extractMessage, extractStatusCode, isEmptyJobData } from './errorHelpers.js';
+import { extractJobTexts, extractMessage, extractStatusCode } from './errorHelpers.js';
 import type { ActionResult, CheckinBackendClient, CheckinJobResult, ChurchToolsConnectionConfig } from './types.js';
 
 // Named-Import ("import { ChurchToolsClient } from ...") funktioniert im
@@ -80,8 +80,8 @@ export class ChurchToolsOldApiClient implements CheckinBackendClient {
 
   async getNextPrinterJob(hostname: string): Promise<CheckinJobResult> {
     const result = await this.callOldApi('getNextPrinterJob', { ort: hostname });
-    if (!result.success) return { success: false, data: null, message: result.message };
-    return { success: true, data: isEmptyJobData(result.data) ? null : (result.data as string) };
+    if (!result.success) return { success: false, data: [], message: result.message };
+    return { success: true, data: extractJobTexts(result.data) };
   }
 
   async activatePrinter(hostname: string, printerName: string): Promise<ActionResult> {

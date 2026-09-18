@@ -27,7 +27,7 @@ function fakeClient(overrides: Partial<Record<string, unknown>> = {}) {
     testLogin: vi.fn(async () => {}),
     ensureLogin: vi.fn(async () => {}),
     onWindowClose: vi.fn(async () => {}),
-    getNextPrinterJob: vi.fn(async () => ({ success: true, data: null })),
+    getNextPrinterJob: vi.fn(async () => ({ success: true, data: [] })),
     activatePrinter: vi.fn(async () => ({ success: true })),
     hidePrinter: vi.fn(async () => ({ success: true })),
     ...overrides,
@@ -98,7 +98,7 @@ describe('PrinterPoller idle polling', () => {
 
 describe('PrinterPoller job handling', () => {
   it('hands received job data to the pipeline and switches to the fast active cadence', async () => {
-    const client = fakeClient({ getNextPrinterJob: vi.fn(async () => ({ success: true, data: 'name=Max\nid=1\ncode=AB\ntype=parent' })) });
+    const client = fakeClient({ getNextPrinterJob: vi.fn(async () => ({ success: true, data: ['name=Max\nid=1\ncode=AB\ntype=parent'] })) });
     const pipeline = fakePipeline();
     const poller = new PrinterPoller({ db, env, group: BASE_GROUP, legs: [BASE_LEG], client, pipeline, adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
 
@@ -107,21 +107,40 @@ describe('PrinterPoller job handling', () => {
     expect(pipeline.processIncomingJob).toHaveBeenCalledWith(BASE_GROUP.hostname, 'name=Max\nid=1\ncode=AB\ntype=parent');
 
     // Nächster Poll ist der kurze 200ms-Folgepoll nach einem Job, nicht das volle Idle-Intervall.
-    client.getNextPrinterJob.mockResolvedValue({ success: true, data: null });
+    client.getNextPrinterJob.mockResolvedValue({ success: true, data: [] });
     await vi.advanceTimersByTimeAsync(200);
     expect(client.getNextPrinterJob).toHaveBeenCalledTimes(2);
 
     poller.stop();
   });
 
-  it('treats empty/whitespace job data as "no job"', async () => {
-    const client = fakeClient({ getNextPrinterJob: vi.fn(async () => ({ success: true, data: '   ' })) });
+  it('treats an empty job list as "no job"', async () => {
+    const client = fakeClient({ getNextPrinterJob: vi.fn(async () => ({ success: true, data: [] })) });
     const pipeline = fakePipeline();
     const poller = new PrinterPoller({ db, env, group: BASE_GROUP, legs: [BASE_LEG], client, pipeline, adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
 
     poller.start();
     await vi.advanceTimersByTimeAsync(0);
     expect(pipeline.processIncomingJob).not.toHaveBeenCalled();
+
+    poller.stop();
+  });
+
+  it('hands ALL jobs from one poll to the pipeline when several check-ins queued up at once (e.g. a family)', async () => {
+    const client = fakeClient({
+      getNextPrinterJob: vi.fn(async () => ({
+        success: true,
+        data: ['name=Max\nid=1\ncode=AB\ntype=child', 'name=Anna\nid=2\ncode=CD\ntype=parent'],
+      })),
+    });
+    const pipeline = fakePipeline();
+    const poller = new PrinterPoller({ db, env, group: BASE_GROUP, legs: [BASE_LEG], client, pipeline, adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+
+    poller.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(pipeline.processIncomingJob).toHaveBeenNthCalledWith(1, BASE_GROUP.hostname, 'name=Max\nid=1\ncode=AB\ntype=child');
+    expect(pipeline.processIncomingJob).toHaveBeenNthCalledWith(2, BASE_GROUP.hostname, 'name=Anna\nid=2\ncode=CD\ntype=parent');
 
     poller.stop();
   });
@@ -159,7 +178,7 @@ describe('PrinterPoller error handling', () => {
 
     expect(client.hidePrinter).toHaveBeenCalledWith('B1');
 
-    client.getNextPrinterJob.mockResolvedValue({ success: true, data: null });
+    client.getNextPrinterJob.mockResolvedValue({ success: true, data: [] });
     await vi.advanceTimersByTimeAsync(5000); // Cooldown abgelaufen -> Wiederanlauf
 
     expect(client.activatePrinter).toHaveBeenCalledWith('B1', 'Empfang');
@@ -265,7 +284,7 @@ describe('PrinterPoller multi-leg groups (virtueller Drucker mit mehreren physis
   });
 
   it('polls ChurchTools and dispatches incoming jobs using the shared hostname, not any single leg`s id', async () => {
-    const client = fakeClient({ getNextPrinterJob: vi.fn(async () => ({ success: true, data: 'name=Max\nid=1\ncode=AB\ntype=parent' })) });
+    const client = fakeClient({ getNextPrinterJob: vi.fn(async () => ({ success: true, data: ['name=Max\nid=1\ncode=AB\ntype=parent'] })) });
     const pipeline = fakePipeline();
     const poller = new PrinterPoller({ db, env, group, legs: [legPrimary, legSecondary], client, pipeline, adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
 

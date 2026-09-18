@@ -146,13 +146,15 @@ export class PrinterPoller {
       const result = await this.deps.client.getNextPrinterJob(this.deps.group.hostname);
       if (!result.success) throw new Error(result.message ?? 'API-Fehler');
 
-      if (!result.data || !result.data.trim()) {
+      if (result.data.length === 0) {
         this.consecutiveErrors = 0;
         this.scheduleNext(interval);
         return;
       }
 
-      await this.deps.pipeline.processIncomingJob(this.deps.group.hostname, result.data);
+      for (const rawData of result.data) {
+        await this.deps.pipeline.processIncomingJob(this.deps.group.hostname, rawData);
+      }
       this.consecutiveErrors = 0;
       this.lastJobAt = Date.now();
       this.scheduleNext(200);

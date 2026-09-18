@@ -34,3 +34,22 @@ export function isEmptyJobData(data: unknown): boolean {
   if (typeof data === 'object') return Object.keys(data).length === 0;
   return false;
 }
+
+/**
+ * Extrahiert das CT-Textformat ("key=value" pro Zeile) aus der oldApi-Antwort
+ * von `getNextPrinterJob`. Trotz des Funktionsnamens (Singular) liefert CT bei
+ * mehreren gleichzeitig anstehenden Check-ins (z.B. Familie mit mehreren
+ * Kindern) ein Array von Job-Objekten statt eines einzelnen — 1:1 aus v1
+ * portiert (`printer-manager.js`/`label-router.js`: `job.data`, defensiv über
+ * `Array.isArray(...) ? ... : [...]`). Ein einzelner Job kann sowohl als
+ * Objekt mit `.data`-Feld als auch (laut v1s `diagnose.js`, das dafür extra
+ * gebaut wurde) direkt als roher String ankommen — beide Formen werden hier
+ * abgedeckt.
+ */
+export function extractJobTexts(data: unknown): string[] {
+  if (isEmptyJobData(data)) return [];
+  const jobs = Array.isArray(data) ? data : [data];
+  return jobs
+    .map((job) => (typeof job === 'string' ? job : (job as { data?: unknown } | null)?.data))
+    .filter((raw): raw is string => typeof raw === 'string' && raw.trim() !== '');
+}

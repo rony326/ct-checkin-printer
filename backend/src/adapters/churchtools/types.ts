@@ -8,8 +8,8 @@
 
 export interface CheckinJobResult {
   success: boolean;
-  /** Rohdaten des Check-in-Jobs (CT-Textformat, "key=value" pro Zeile) oder leer, wenn kein Job ansteht. */
-  data: string | null;
+  /** Rohdaten aller aktuell anstehenden Check-in-Jobs (CT-Textformat, "key=value" pro Zeile), leeres Array wenn keiner ansteht. Trotz des Funktionsnamens "getNextPrinterJob" (Singular) kann CT mehrere gleichzeitig liefern (siehe extractJobTexts). */
+  data: string[];
   message?: string;
 }
 
