@@ -45,9 +45,31 @@ interface LayoutPrintOutcome {
  */
 export class PrintPipeline {
   private readonly logger: Pick<Console, 'info' | 'warn' | 'error'>;
+  /**
+   * Pro-Drucker-Kette (nicht nur pro processIncomingJob()-Aufruf!): ChurchTools
+   * kann pro Poll mehrere Jobs auf einmal liefern (siehe PrinterPoller — die
+   * verarbeitet der Poller inzwischen parallel), jeder Job ruft
+   * processIncomingJob() separat auf. Ohne diese Kette könnten zwei Jobs, die
+   * zufällig auf denselben physischen Drucker zeigen, gleichzeitig auf dessen
+   * TCP-Verbindung schreiben (kaputtes Rasterbild). Verschiedene Drucker
+   * bleiben davon unberührt und laufen weiterhin parallel — 1:1 v1s
+   * label-router.js-Verhalten ("Jobs mit gleichem Drucker sequenziell, Jobs
+   * auf verschiedenen Druckern parallel").
+   */
+  private readonly printerChains = new Map<number, Promise<unknown>>();
 
   constructor(private readonly deps: PrintPipelineDeps) {
     this.logger = deps.logger ?? console;
+  }
+
+  private runExclusivePerPrinter<T>(printerId: number, fn: () => Promise<T>): Promise<T> {
+    const prior = this.printerChains.get(printerId) ?? Promise.resolve();
+    const settled = prior.then(fn, fn);
+    this.printerChains.set(
+      printerId,
+      settled.catch(() => {}),
+    );
+    return settled;
   }
 
   async processIncomingJob(hostname: string, rawData: string, now: () => number = Date.now): Promise<ProcessIncomingJobResult> {
@@ -65,38 +87,29 @@ export class PrintPipeline {
     const layouts = resolveLayoutsForJob(this.deps.db, hostname, parsed.type ?? '');
 
     // also[]-Layouts (siehe routing.ts) können auf einen ANDEREN physischen
-    // Drucker zeigen als das Primär-Layout — 1:1 v1s label-router.js-Verhalten
-    // ("Jobs mit gleichem Drucker werden sequenziell gedruckt, Jobs auf
-    // verschiedenen Druckern parallel"): pro Ziel-Drucker gruppieren, die
-    // Gruppen dann parallel abarbeiten, damit ein langsamer/nicht erreichbarer
-    // Drucker nicht die anderen ausbremst (z.B. Endlos- + Klebeetikett
-    // gleichzeitig statt nacheinander).
-    const layoutsByPrinter = new Map<number | null, LabelLayoutRow[]>();
-    for (const layout of layouts) {
-      const key = layout.printerId;
-      const group = layoutsByPrinter.get(key);
-      if (group) group.push(layout);
-      else layoutsByPrinter.set(key, [layout]);
-    }
-
+    // Drucker zeigen als das Primär-Layout, und ein Poll kann mehrere Jobs auf
+    // einmal liefern (siehe PrinterPoller) — jedes Layout startet daher sofort
+    // parallel, `runExclusivePerPrinter` serialisiert nur, was tatsächlich auf
+    // denselben physischen Drucker zeigt (siehe Kommentar an printerChains).
     let printed = 0;
     let queued = 0;
     await Promise.all(
-      Array.from(layoutsByPrinter.values()).map(async (printerLayouts) => {
-        for (const layout of printerLayouts) {
-          const outcome = await this.attemptPrintLayout(layout, parsed, unixTimestampSeconds);
-          if (outcome.success) {
-            printed++;
-          } else {
-            queued++;
-            enqueueJob(this.deps.db, {
-              printerId: layout.printerId ?? origin.leg.id,
-              layoutId: layout.id,
-              payload: { rawData, unixTimestampSeconds },
-              reason: outcome.errorMessage ?? 'Unbekannter Fehler',
-              printError: outcome.printError ?? false,
-            });
-          }
+      layouts.map(async (layout) => {
+        const outcome =
+          layout.printerId !== null
+            ? await this.runExclusivePerPrinter(layout.printerId, () => this.attemptPrintLayout(layout, parsed, unixTimestampSeconds))
+            : await this.attemptPrintLayout(layout, parsed, unixTimestampSeconds);
+        if (outcome.success) {
+          printed++;
+        } else {
+          queued++;
+          enqueueJob(this.deps.db, {
+            printerId: layout.printerId ?? origin.leg.id,
+            layoutId: layout.id,
+            payload: { rawData, unixTimestampSeconds },
+            reason: outcome.errorMessage ?? 'Unbekannter Fehler',
+            printError: outcome.printError ?? false,
+          });
         }
       }),
     );

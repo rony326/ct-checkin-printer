@@ -152,9 +152,13 @@ export class PrinterPoller {
         return;
       }
 
-      for (const rawData of result.data) {
-        await this.deps.pipeline.processIncomingJob(this.deps.group.hostname, rawData);
-      }
+      // Parallel statt nacheinander: mehrere Jobs aus einem Poll (z.B. zwei
+      // Check-ins kurz hintereinander) zielen oft auf unterschiedliche
+      // physische Drucker — sequenzielles Warten würde Job 2 unnötig hinter
+      // Job 1s komplette Renderzeit+Statusabfrage zurückstellen. Kollisionen
+      // auf demselben Drucker serialisiert PrintPipeline selbst (siehe
+      // `runExclusivePerPrinter` dort).
+      await Promise.all(result.data.map((rawData) => this.deps.pipeline.processIncomingJob(this.deps.group.hostname, rawData)));
       this.consecutiveErrors = 0;
       this.lastJobAt = Date.now();
       this.scheduleNext(200);

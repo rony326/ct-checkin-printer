@@ -144,6 +144,33 @@ describe('PrinterPoller job handling', () => {
 
     poller.stop();
   });
+
+  it('processes multiple jobs from one poll in parallel, not one after another (Produktionsbug: zweiter Job wartete bislang komplett auf den ersten, obwohl beide auf verschiedene Drucker zielen)', async () => {
+    let releaseSlowJob!: () => void;
+    const slowGate = new Promise<void>((resolve) => (releaseSlowJob = resolve));
+    let fastJobRanWhileSlowJobStillPending = false;
+
+    const client = fakeClient({
+      getNextPrinterJob: vi.fn(async () => ({ success: true, data: ['slow-job', 'fast-job'] })),
+    });
+    const pipeline = {
+      processIncomingJob: vi.fn(async (_hostname: string, rawData: string) => {
+        if (rawData === 'slow-job') await slowGate;
+        else fastJobRanWhileSlowJobStillPending = true;
+        return { enriched: true, printed: 1, queued: 0 };
+      }),
+    };
+    const poller = new PrinterPoller({ db, env, group: BASE_GROUP, legs: [BASE_LEG], client, pipeline, adapters: fakeAdapters(), config: DEFAULT_APP_CONFIG });
+
+    poller.start();
+    await vi.advanceTimersByTimeAsync(0);
+    // 'fast-job' muss durchgelaufen sein, OBWOHL 'slow-job' noch auf seinem Gate hängt —
+    // bei einer sequenziellen for-await-Schleife (die alte Implementierung) wäre das nicht der Fall.
+    expect(fastJobRanWhileSlowJobStillPending).toBe(true);
+
+    releaseSlowJob();
+    poller.stop();
+  });
 });
 
 describe('PrinterPoller error handling', () => {

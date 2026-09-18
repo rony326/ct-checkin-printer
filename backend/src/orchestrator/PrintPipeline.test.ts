@@ -215,6 +215,79 @@ describe('PrintPipeline.processIncomingJob', () => {
     const result = await resultPromise;
     expect(result.printed).toBe(2);
   });
+
+  it('runs TWO SEPARATE processIncomingJob()-calls (z.B. zwei Check-ins aus einem Poll) auf verschiedenen Druckern parallel statt nacheinander', async () => {
+    const printerA = makePrinter('B1');
+    const printerB = makePrinter('B2');
+    const media = makeMedia();
+    db.insert(labelLayouts).values({ name: 'Eltern', ctTypeKey: 'parent', printerId: printerA.id, mediaId: media.id, elementsJson: STATIC_ELEMENTS }).run();
+    db.insert(labelLayouts).values({ name: 'Kind', ctTypeKey: 'child', printerId: printerB.id, mediaId: media.id, elementsJson: STATIC_ELEMENTS }).run();
+
+    let releaseSlowPrinter!: () => void;
+    const slowGate = new Promise<void>((resolve) => (releaseSlowPrinter = resolve));
+    let fastPrinterCalledWhileSlowStillPending = false;
+
+    const adapterA = makeAdapter({
+      getStatus: vi.fn(async () => {
+        await slowGate;
+        return { status: PrinterStatus.ONLINE, humanMessage: 'OK', source: 'print-channel' as const, timestamp: new Date() };
+      }),
+    });
+    const adapterB = makeAdapter({
+      printLabel: vi.fn(async () => {
+        fastPrinterCalledWhileSlowStillPending = true;
+        return { success: true };
+      }),
+    });
+    const pipeline = new PrintPipeline({
+      db,
+      env,
+      adapters: { getAdapter: async (p) => (p.id === printerA.id ? adapterA : adapterB) },
+    });
+
+    // Zwei getrennte Jobs — wie sie PrinterPoller inzwischen per Promise.all aus EINEM Poll heraus feuert.
+    const childRaw = 'name=Kind K.\nid=99\ncode=XYZ\ngroup=Kids\ntype=child';
+    const job1 = pipeline.processIncomingJob(printerA.hostname, RAW_DATA, () => 1735600000000);
+    const job2 = pipeline.processIncomingJob(printerB.hostname, childRaw, () => 1735600000000);
+
+    await vi.waitFor(() => expect(fastPrinterCalledWhileSlowStillPending).toBe(true));
+    releaseSlowPrinter();
+
+    const [result1, result2] = await Promise.all([job1, job2]);
+    expect(result1.printed).toBe(1);
+    expect(result2.printed).toBe(1);
+  });
+
+  it('serialisiert zwei SEPARATE processIncomingJob()-Aufrufe, die zufällig auf DENSELBEN Drucker zeigen (keine überlappenden printLabel()-Aufrufe)', async () => {
+    const printerA = makePrinter('B1');
+    const media = makeMedia();
+    db.insert(labelLayouts).values({ name: 'Eltern', ctTypeKey: 'parent', printerId: printerA.id, mediaId: media.id, elementsJson: STATIC_ELEMENTS }).run();
+    db.insert(labelLayouts).values({ name: 'Kind', ctTypeKey: 'child', printerId: printerA.id, mediaId: media.id, elementsJson: STATIC_ELEMENTS }).run();
+
+    let concurrentPrintCalls = 0;
+    let sawOverlap = false;
+    const adapter = makeAdapter({
+      printLabel: vi.fn(async () => {
+        concurrentPrintCalls++;
+        if (concurrentPrintCalls > 1) sawOverlap = true;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        concurrentPrintCalls--;
+        return { success: true };
+      }),
+    });
+    const pipeline = new PrintPipeline({ db, env, adapters: { getAdapter: async () => adapter } });
+
+    const childRaw = 'name=Kind K.\nid=99\ncode=XYZ\ngroup=Kids\ntype=child';
+    const [result1, result2] = await Promise.all([
+      pipeline.processIncomingJob(printerA.hostname, RAW_DATA, () => 1735600000000),
+      pipeline.processIncomingJob(printerA.hostname, childRaw, () => 1735600000000),
+    ]);
+
+    expect(sawOverlap).toBe(false);
+    expect(result1.printed).toBe(1);
+    expect(result2.printed).toBe(1);
+    expect(adapter.printLabel).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('PrintPipeline.retryQueuedJob', () => {
