@@ -166,6 +166,55 @@ describe('PrintPipeline.processIncomingJob', () => {
     const labelTypes = db.select().from(printLog).all().map((l) => l.labelType);
     expect(labelTypes.sort()).toEqual(['parent', 'summary']);
   });
+
+  it('prints also[]-layouts on different printers in parallel, not one after another (v1 label-router.js: "Jobs auf verschiedenen Druckern parallel")', async () => {
+    const printerA = makePrinter('B1');
+    const printerB = makePrinter('B2');
+    const media = makeMedia();
+    const [primary] = db
+      .insert(labelLayouts)
+      .values({ name: 'Eltern', ctTypeKey: 'parent', printerId: printerA.id, mediaId: media.id, elementsJson: STATIC_ELEMENTS })
+      .returning()
+      .all();
+    const [also] = db
+      .insert(labelLayouts)
+      .values({ name: 'Sammelzettel', ctTypeKey: 'summary', printerId: printerB.id, mediaId: media.id, elementsJson: STATIC_ELEMENTS })
+      .returning()
+      .all();
+    db.insert(labelLayoutAlso).values({ layoutId: primary!.id, alsoLayoutId: also!.id }).run();
+
+    // Drucker A ist künstlich langsam (hängt an einem nie auflösenden getStatus, bis wir es freigeben).
+    let releaseSlowPrinter!: () => void;
+    const slowGate = new Promise<void>((resolve) => (releaseSlowPrinter = resolve));
+    let fastPrinterCalledWhileSlowStillPending = false;
+
+    const adapterA = makeAdapter({
+      getStatus: vi.fn(async () => {
+        await slowGate;
+        return { status: PrinterStatus.ONLINE, humanMessage: 'OK', source: 'print-channel' as const, timestamp: new Date() };
+      }),
+    });
+    const adapterB = makeAdapter({
+      printLabel: vi.fn(async () => {
+        fastPrinterCalledWhileSlowStillPending = true;
+        return { success: true };
+      }),
+    });
+    const pipeline = new PrintPipeline({
+      db,
+      env,
+      adapters: { getAdapter: async (p) => (p.id === printerA.id ? adapterA : adapterB) },
+    });
+
+    const resultPromise = pipeline.processIncomingJob(printerA.hostname, RAW_DATA, () => 1735600000000);
+    // Drucker B (schnell) muss fertig drucken können, WÄHREND Drucker A noch auf getStatus() wartet —
+    // wäre die Verarbeitung sequenziell (Promise-Kette statt Promise.all), würde B nie vor A drankommen.
+    await vi.waitFor(() => expect(fastPrinterCalledWhileSlowStillPending).toBe(true));
+    releaseSlowPrinter();
+
+    const result = await resultPromise;
+    expect(result.printed).toBe(2);
+  });
 });
 
 describe('PrintPipeline.retryQueuedJob', () => {

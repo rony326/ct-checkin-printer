@@ -59,23 +59,42 @@ export class PrintPipeline {
     const unixTimestampSeconds = Math.floor(now() / 1000);
     const layouts = resolveLayoutsForJob(this.deps.db, hostname, parsed.type ?? '');
 
+    // also[]-Layouts (siehe routing.ts) können auf einen ANDEREN physischen
+    // Drucker zeigen als das Primär-Layout — 1:1 v1s label-router.js-Verhalten
+    // ("Jobs mit gleichem Drucker werden sequenziell gedruckt, Jobs auf
+    // verschiedenen Druckern parallel"): pro Ziel-Drucker gruppieren, die
+    // Gruppen dann parallel abarbeiten, damit ein langsamer/nicht erreichbarer
+    // Drucker nicht die anderen ausbremst (z.B. Endlos- + Klebeetikett
+    // gleichzeitig statt nacheinander).
+    const layoutsByPrinter = new Map<number | null, LabelLayoutRow[]>();
+    for (const layout of layouts) {
+      const key = layout.printerId;
+      const group = layoutsByPrinter.get(key);
+      if (group) group.push(layout);
+      else layoutsByPrinter.set(key, [layout]);
+    }
+
     let printed = 0;
     let queued = 0;
-    for (const layout of layouts) {
-      const outcome = await this.attemptPrintLayout(layout, parsed, unixTimestampSeconds);
-      if (outcome.success) {
-        printed++;
-      } else {
-        queued++;
-        enqueueJob(this.deps.db, {
-          printerId: layout.printerId ?? origin.leg.id,
-          layoutId: layout.id,
-          payload: { rawData, unixTimestampSeconds },
-          reason: outcome.errorMessage ?? 'Unbekannter Fehler',
-          printError: outcome.printError ?? false,
-        });
-      }
-    }
+    await Promise.all(
+      Array.from(layoutsByPrinter.values()).map(async (printerLayouts) => {
+        for (const layout of printerLayouts) {
+          const outcome = await this.attemptPrintLayout(layout, parsed, unixTimestampSeconds);
+          if (outcome.success) {
+            printed++;
+          } else {
+            queued++;
+            enqueueJob(this.deps.db, {
+              printerId: layout.printerId ?? origin.leg.id,
+              layoutId: layout.id,
+              payload: { rawData, unixTimestampSeconds },
+              reason: outcome.errorMessage ?? 'Unbekannter Fehler',
+              printError: outcome.printError ?? false,
+            });
+          }
+        }
+      }),
+    );
 
     const payload = buildCheckinWebhookPayload({ hostname: origin.group.hostname, name: origin.group.name, host: origin.leg.host }, parsed, unixTimestampSeconds);
     await dispatchOutgoingWebhooks(this.deps.db, this.deps.env, 'checkin', payload);
