@@ -169,7 +169,7 @@ export interface SummaryResult {
   empty: boolean;
 }
 
-export type PollerMode ='sleeping' | 'idle' | 'active';
+export type PollerMode = 'sleeping' | 'idle' | 'active';
 
 export interface DashboardPrinterStatus {
   groupId: number;

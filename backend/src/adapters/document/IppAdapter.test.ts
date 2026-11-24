@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
 import * as ipp from 'ipp';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PrinterStatus } from '../printer/types.js';
@@ -72,6 +72,38 @@ describe('IppAdapter.printDocument', () => {
     const result = await adapter.printDocument(Buffer.from('%PDF-1.4 fake'), {});
 
     expect(result.success).toBe(false);
+  });
+});
+
+describe('IppAdapter.printDocument timeout', () => {
+  it('gives up with an error when the printer accepts the connection but never answers', async () => {
+    const sockets: Socket[] = [];
+    server = createServer(() => {
+      // nimmt die Anfrage an und antwortet nie
+    });
+    server.on('connection', (s) => sockets.push(s));
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+
+    const adapter = new IppAdapter({ printTimeoutMs: 50 });
+    await adapter.connect({ host: '127.0.0.1', port, ippQueue: 'print' });
+
+    const result = await adapter.printDocument(Buffer.from('%PDF-1.4 fake'), {});
+
+    expect(result).toEqual({ success: false, errorMessage: 'Zeitüberschreitung beim Drucken' });
+    sockets.forEach((s) => s.destroy());
+  });
+
+  it('clears the timer after a normal completion', async () => {
+    const port = await startFakeIppPrinter(() => okResponse());
+    const adapter = new IppAdapter({ printTimeoutMs: 60_000 });
+    await adapter.connect({ host: '127.0.0.1', port, ippQueue: 'print' });
+    const before = process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+
+    const result = await adapter.printDocument(Buffer.from('%PDF-1.4 fake'), {});
+
+    expect(result.success).toBe(true);
+    expect(process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length).toBeLessThanOrEqual(before);
   });
 });
 

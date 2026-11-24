@@ -18,6 +18,8 @@ type IppPrinter = InstanceType<typeof ippModule.Printer>;
 
 export interface IppAdapterOptions {
   printerLabel?: string;
+  /** Obergrenze für einen Druckauftrag (ms); `ipp` setzt selbst keinen Timeout. Standard 45 s, unter den 60 s des Pi-Tasters. */
+  printTimeoutMs?: number;
 }
 
 /**
@@ -31,9 +33,11 @@ export class IppAdapter implements DocumentPrinterAdapter {
   readonly protocol = 'ipp' as const;
   private printer: IppPrinter | null = null;
   private readonly printerLabel: string;
+  private readonly printTimeoutMs: number;
 
   constructor(opts: IppAdapterOptions = {}) {
     this.printerLabel = opts.printerLabel ?? 'Netzwerkdrucker';
+    this.printTimeoutMs = opts.printTimeoutMs ?? 45_000;
   }
 
   async connect(cfg: DocumentPrinterConnectionConfig): Promise<void> {
@@ -43,6 +47,9 @@ export class IppAdapter implements DocumentPrinterAdapter {
   async printDocument(pdf: Buffer, opts: { copies?: number }): Promise<PrintResult> {
     const printer = this.requirePrinter();
     return new Promise((resolve) => {
+      // Ein hängender Drucker (TCP angenommen, nie geantwortet) würde sonst die Sperre des
+      // Sammelausdrucks für immer halten.
+      const timer = setTimeout(() => resolve({ success: false, errorMessage: 'Zeitüberschreitung beim Drucken' }), this.printTimeoutMs);
       printer.execute(
         'Print-Job',
         {
@@ -55,6 +62,7 @@ export class IppAdapter implements DocumentPrinterAdapter {
           data: pdf,
         },
         (err, res) => {
+          clearTimeout(timer);
           if (err) return resolve({ success: false, errorMessage: err.message });
           if (res.statusCode.startsWith('successful')) return resolve({ success: true });
           resolve({ success: false, errorMessage: `IPP-Fehler: ${res.statusCode}` });

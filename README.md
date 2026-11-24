@@ -209,6 +209,12 @@ Bedienung:
   curl -X POST -H "Authorization: Bearer <SECRET>" <URL>
   ```
 
+- **Grenze beim Drucken**: „erfolgreich“ (Antwort `ok: true`, grüne LED am Pi)
+  heisst nur „der Drucker hat den Auftrag angenommen“. Ein Drucker ohne
+  Papier, mit offener Klappe oder im Pausenmodus nimmt den Auftrag trotzdem
+  oft an. Nach den ersten echten Tests deshalb den Fall „Papier leer“ einmal
+  von Hand ausprobieren.
+
 - **Automatisch**: `trigger: window_close` druckt weiterhin am Ende des
   Check-in-Zeitfensters von selbst.
 

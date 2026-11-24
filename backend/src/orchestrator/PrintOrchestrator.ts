@@ -160,7 +160,8 @@ export class PrintOrchestrator {
     const layouts = this.db.select().from(summaryLayouts).where(eq(summaryLayouts.trigger, 'window_close')).all();
     for (const layout of layouts) {
       try {
-        await this.summaryReportService.generate(layout.id, since, until);
+        const r = await this.summaryReportService.generate(layout.id, since, until);
+        if (!r.ok) this.logger.error(`Sammelausdruck "${layout.name}" fehlgeschlagen: ${r.message}`);
       } catch (err) {
         this.logger.error(`Sammelausdruck "${layout.name}" fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`);
       }

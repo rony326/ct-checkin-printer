@@ -157,4 +157,21 @@ describe('PrintOrchestrator — Gruppen-Sammelausdruck', () => {
     expect(summaryReportService.generate).toHaveBeenCalledTimes(2);
     await orchestrator.stop();
   });
+
+  it('triggerWindowCloseSummaries() logs an ok:false result (generate() catches per group instead of throwing)', async () => {
+    const { leg: outputPrinter } = makePrinterGroupWithLeg('OUT');
+    db.insert(summaryLayouts).values({ name: 'Kinderliste', printerId: outputPrinter.id, trigger: 'window_close' }).run();
+
+    const summaryReportService = {
+      generate: vi.fn(async () => ({ ok: false, message: 'Drucker offline', groupsPrinted: 0, groupsFailed: 1, empty: false })),
+    } as unknown as SummaryReportService;
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const orchestrator = new PrintOrchestrator({ db, env, summaryReportService, logger });
+    await orchestrator.start();
+
+    await orchestrator.triggerWindowCloseSummaries(new Date(), new Date());
+
+    expect(logger.error).toHaveBeenCalledWith('Sammelausdruck "Kinderliste" fehlgeschlagen: Drucker offline');
+    await orchestrator.stop();
+  });
 });

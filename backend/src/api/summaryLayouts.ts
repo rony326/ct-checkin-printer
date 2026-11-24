@@ -173,6 +173,8 @@ export async function registerSummaryLayoutRoutes(app: FastifyInstance) {
 
     const result = await runLocked(row.id, () => app.orchestrator.triggerManualSummary(row.id, startOfToday(), new Date()));
     if (result === 'busy') return reply.code(409).send({ error: 'Sammelausdruck läuft bereits' });
+    // ok:false kommt als HTTP 200 zurück und wäre im Access-Log unsichtbar.
+    if (!result.ok) request.log.warn({ layoutId: row.id, message: result.message }, 'Sammelausdruck fehlgeschlagen');
     return result;
   });
 }

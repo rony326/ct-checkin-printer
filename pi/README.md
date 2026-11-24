@@ -26,7 +26,9 @@ sudo systemctl enable --now ct-summary-button
 
 URL und Secret stehen auf der GUI-Seite „Sammelausdrucke“. `gpiozero` ist unter Raspberry Pi OS vorinstalliert.
 
-Logs: `journalctl -u ct-summary-button -f` (das Secret wird nie geloggt).
+Logs: `journalctl -u ct-summary-button -f` (das Secret wird nie geloggt). Bei Fehlern steht der Grund im Journal (`HTTP 401`, `nicht erreichbar: ...`, `Timeout` oder die Meldung des Servers).
+
+Fehlen `TRIGGER_URL`/`TRIGGER_SECRET`, beendet sich der Dienst mit Code 2 und startet nicht neu. Nach dem Korrigieren von `/etc/ct-summary-button.env` von Hand starten: `sudo systemctl restart ct-summary-button`.
 
 Startet Docker nach dem Dienst, wird ein Druck als Fehler gemeldet (LED schnell blinken); der nächste Druck funktioniert normal.
 
@@ -48,11 +50,13 @@ Dafür ist kein Code nötig.
 |---|---|
 | 3× kurz blinken | Dienst gestartet, bereit |
 | langsam blinken (0,5 s) | Druck läuft, bitte warten |
-| 5 s dauerhaft an | Erfolgreich gedruckt |
+| 5 s dauerhaft an | Der Drucker hat den Auftrag angenommen (siehe Hinweis unten) |
 | 2× langsam blinken (1 s an / 0,5 s aus) | Nichts zu drucken (leere Liste) |
-| 10 s schnell blinken | Fehler (Server nicht erreichbar, Druckfehler, Druck läuft schon, falsches Secret) |
+| 10 s schnell blinken | Fehler (Server nicht erreichbar, Druckfehler, Druck läuft schon, falsches Secret, 404: Zugang deaktiviert oder Layout gelöscht) |
 
 Drücke während eines laufenden Drucks werden ignoriert.
+
+Grenze: „Erfolgreich“ heisst nur „der Drucker hat den Auftrag angenommen“. Ein Drucker ohne Papier, mit offener Klappe oder im Pausenmodus nimmt den Auftrag trotzdem oft an, die LED leuchtet dann grün, es kommt aber nichts heraus. Nach den ersten echten Tests deshalb den Fall „Papier leer“ einmal von Hand ausprobieren.
 
 ## Test ohne Taster
 
@@ -61,7 +65,7 @@ curl -X POST -H "Authorization: Bearer <SECRET>" <TRIGGER_URL>
 ```
 
 Kein `-d` und kein `Content-Type`-Header: Ein leerer Body mit Content-Type wird vom Server abgelehnt.
-Antworten: 200 (gedruckt, JSON mit `ok`/`empty`), 401 falsches Secret, 404 unbekannter oder deaktivierter Token, 409 Druck läuft bereits.
+Antworten: 200 mit JSON (`ok: true` = Auftrag angenommen, `empty: true` = nichts zu drucken; `ok: false` mit `message` = Druckerfehler, nichts gedruckt), 401 falsches Secret, 404 unbekannter oder deaktivierter Token, 409 Druck läuft bereits.
 Der Aufruf wartet auf das echte Druckergebnis und kann länger dauern (Timeout 60 s).
 
 ## Unit-Tests (auf dem Entwicklungsrechner)
