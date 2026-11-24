@@ -139,7 +139,37 @@ export interface DocumentPrinter {
   ippQueue: string;
 }
 
-export type PollerMode = 'sleeping' | 'idle' | 'active';
+export type SummaryColumn = 'name' | 'code' | 'checkinTime';
+export type SummaryTrigger = 'manual' | 'window_close';
+
+/** Backend-Zeile von summary_layouts ohne triggerSecretEnc (das Secret verlässt den Server nie in der Liste). */
+export interface SummaryLayout {
+  id: number;
+  name: string;
+  groupByField: string;
+  printerId: number | null;
+  documentPrinterId: number | null;
+  columnsJson: SummaryColumn[];
+  titleTemplate: string;
+  trigger: SummaryTrigger;
+  verifyAgainstCt: boolean;
+  triggerToken: string | null;
+  triggerEnabled: boolean;
+  hasTriggerSecret: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Gespiegelt von GenerateSummaryResult (backend/src/orchestrator/SummaryReportService.ts). */
+export interface SummaryResult {
+  ok: boolean;
+  message?: string;
+  groupsPrinted: number;
+  groupsFailed: number;
+  empty: boolean;
+}
+
+export type PollerMode ='sleeping' | 'idle' | 'active';
 
 export interface DashboardPrinterStatus {
   groupId: number;

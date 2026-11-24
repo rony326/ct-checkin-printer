@@ -12,6 +12,7 @@ import { ChurchToolsSettings } from './pages/ChurchToolsSettings.js';
 import { Webhooks } from './pages/Webhooks.js';
 import { DocumentPrinters } from './pages/DocumentPrinters.js';
 import { AppConfigSettings } from './pages/AppConfigSettings.js';
+import { SummaryLayouts } from './pages/SummaryLayouts.js';
 
 type AuthStatus = { setupRequired: boolean; authenticated: boolean };
 
@@ -43,6 +44,7 @@ export function App() {
         <Route path="/churchtools" element={<ChurchToolsSettings />} />
         <Route path="/webhooks" element={<Webhooks />} />
         <Route path="/document-printers" element={<DocumentPrinters />} />
+        <Route path="/summary-layouts" element={<SummaryLayouts />} />
         <Route path="/settings" element={<AppConfigSettings />} />
       </Route>
     </Routes>

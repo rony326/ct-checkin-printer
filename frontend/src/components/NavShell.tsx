@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { to: '/printers', label: 'Drucker' },
   { to: '/churchtools', label: 'ChurchTools' },
   { to: '/webhooks', label: 'Webhooks' },
+  { to: '/summary-layouts', label: 'Sammelausdrucke' },
   { to: '/document-printers', label: 'Sammelausdruck-Drucker' },
   { to: '/settings', label: 'Einstellungen' },
 ];
