@@ -28,6 +28,7 @@ siehe [Bekannte Lücken](#bekannte-lücken).
 - [Zeitfenster (`activeTimes`)](#zeitfenster-activetimes)
 - [Webhooks](#webhooks)
 - [Gruppen-Sammelausdruck](#gruppen-sammelausdruck)
+- [Betrieb auf dem Raspberry Pi](#betrieb-auf-dem-raspberry-pi)
 - [Migration von v1](#migration-von-v1)
 - [Betrieb: Backup & Updates](#betrieb-backup--updates)
 - [Bekannte Lücken](#bekannte-lücken)
@@ -54,9 +55,12 @@ siehe [Bekannte Lücken](#bekannte-lücken).
 - **DB-persistente Retry-Queue**: nicht zustellbare Etiketten überleben einen
   Neustart und werden automatisch nachgedruckt, sobald der Zieldrucker wieder
   bereit ist.
-- **Gruppen-Sammelausdruck**: am Ende eines Check-in-Zeitfensters (oder manuell)
-  ein Ausdruck pro Gruppe mit allen Namen/Codes — wahlweise als
-  Etikettenstreifen oder als PDF auf einem IPP-Netzwerkdrucker.
+- **Gruppen-Sammelausdruck**: am Ende eines Check-in-Zeitfensters (oder per
+  Knopfdruck im GUI) ein Ausdruck pro Gruppe mit allen Namen/Codes — wahlweise
+  als Etikettenstreifen oder als PDF auf einem IPP-Netzwerkdrucker.
+- **Hardware-Taster am Raspberry Pi**: ein Tastendruck druckt die
+  Anwesenheitsliste für heute, eine LED zeigt den Status (Pi-Dienst in
+  [`pi/`](pi/README.md)).
 - **Webhooks**: ausgehend (Check-in-Events, Drucker-Statusereignisse) und
   eingehend (secret-geschützter Endpunkt, z.B. für n8n oder ein künftiges
   Self-Checkin-Kiosk, unabhängig von ChurchTools).
@@ -127,6 +131,7 @@ danach über das Web-GUI verwaltet:
 | `APP_PORT` | nein | `3000` | HTTP-Port |
 | `APP_HOST` | nein | `0.0.0.0` | Bind-Adresse |
 | `LOG_LEVEL` | nein | `info` | `debug` \| `info` \| `warn` \| `error` |
+| `TZ` | nein | `Europe/Zurich` (in `docker-compose.yml`) | Zeitzone des Containers. Ohne sie läuft er auf UTC: „heute 00:00“ beim Sammelausdruck, die Uhrzeiten auf der Liste und die `activeTimes`-Fenster wären um 1–2 h verschoben |
 
 ## Ersteinrichtung im Web-GUI
 
@@ -159,8 +164,9 @@ Mo-Fr:08:00-17:00,So:09:00-12:00
 So:09:00-12:00 18:00-20:00        # mehrere Fenster am selben Tag, space-getrennt
 ```
 
-Leer/`always` = immer aktiv. `inherit` übernimmt einen globalen Default (siehe
-`app_config`-Tabelle — aktuell nur DB-seitig setzbar, kein eigener GUI-Screen).
+Leer/`always` = immer aktiv. `inherit` übernimmt das globale Zeitfenster, das im GUI unter `/settings`
+(„Globales Zeitfenster“) gepflegt wird. Alle Fenster gelten in der
+Zeitzone des Containers (`TZ`, siehe oben).
 
 ## Webhooks
 
@@ -176,20 +182,57 @@ Leer/`always` = immer aktiv. `inherit` übernimmt einen globalen Default (siehe
 
 ## Gruppen-Sammelausdruck
 
-Ein `summary_layouts`-Eintrag druckt am Ende eines Check-in-Zeitfensters
-(`trigger: window_close`) oder per Knopfdruck (`trigger: manual`,
-`POST /api/summary-layouts/:id/print`) pro Gruppe eine Liste aller
-erfolgreich gedruckten Check-ins (Name/Code/Uhrzeit) — Datenquelle ist
-ausschliesslich `print_log`. Zielausgabe wahlweise:
+Ein Sammelausdruck druckt pro ChurchTools-Gruppe eine Liste aller erfolgreich
+gedruckten Check-ins (Name/Code/Uhrzeit) — es wird also **ein Dokument pro
+Gruppe** gedruckt. Datenquelle ist ausschliesslich `print_log`: nur Check-ins,
+die tatsächlich erfolgreich gedruckt wurden, erscheinen auf der Liste.
+Zielausgabe wahlweise:
 
 - ein vorhandener Etikettendrucker im Endlosband-Modus, oder
 - ein A4/Büro-Netzwerkdrucker per IPP (`document_printers`, PDF-Tabelle).
+
+Bedienung:
+
+- **Verwalten**: im GUI auf der Seite „Sammelausdrucke“ (`/summary-layouts`)
+  Layouts anlegen, ändern, löschen.
+- **Testen**: dort „Jetzt drucken (heute)“ — Zeitraum ist heute 00:00
+  (Ortszeit, siehe `TZ`) bis jetzt.
+- **Auslösen im Alltag**: per Hardware-Taster am Raspberry Pi. Der Abschnitt
+  „Hardware-Taster“ auf der GUI-Seite erzeugt URL und Secret (Token/Secret,
+  Env-Block zum Kopieren); der Pi-Dienst liegt in [`pi/`](pi/README.md)
+  (Verdrahtung, Installation, LED-Muster). Der Endpunkt
+  `POST /api/summary-trigger/<token>` (`Authorization: Bearer <secret>`) lässt
+  sich auch von Hand testen — genau so, ohne `-d` und ohne Content-Type (ein
+  leerer Body mit Content-Type wird abgelehnt):
+
+  ```bash
+  curl -X POST -H "Authorization: Bearer <SECRET>" <URL>
+  ```
+
+- **Automatisch**: `trigger: window_close` druckt weiterhin am Ende des
+  Check-in-Zeitfensters von selbst.
 
 > **Bekannte Lücke:** der optionale `verify_against_ct`-Abgleich gegen
 > ChurchTools' eigene Checkin-Liste einer Gruppe (Absicherung gegen
 > fehlgeschlagene/wiederholte Drucke) ist im Schema vorgesehen, aber noch
 > **nicht implementiert** — dafür fehlt noch die Recherche zu einem
 > passenden ChurchTools-oldApi-Endpunkt.
+
+## Betrieb auf dem Raspberry Pi
+
+Vorgesehen ist ein Raspberry Pi 4, auf dem sowohl Docker (dieser Server) als
+auch der Tasten-Dienst aus [`pi/`](pi/README.md) laufen. **Status: nicht
+getestet.** Für alle nativen Abhängigkeiten gibt es ARM64-Binaries, aber der
+Betrieb auf einem echten Pi ist unverifiziert, und das Docker-Image wurde bisher
+nicht einmal auf x86 gebaut — es *sollte* laufen, ist aber noch nicht getestet.
+
+- **64-bit Raspberry Pi OS** ist Voraussetzung.
+- **`TZ`** ist in `docker-compose.yml` auf `Europe/Zurich` voreingestellt
+  (überschreibbar über `.env`). Beim ersten Pi-Test bestätigen, dass Node im
+  Image die Zeitzone auflöst:
+  `docker compose exec app node -e "console.log(new Date().toString())"`
+  (in der Winterzeit muss `GMT+0100` erscheinen; `date` im Container reicht
+  nicht als Nachweis).
 
 ## Migration von v1
 
@@ -228,6 +271,8 @@ werden.
 - **Editor nicht per Playwright/E2E abgesichert** — Drag/Drop, Vorschau und
   Speichern wurden manuell verifiziert, es existiert keine automatisierte
   Browser-Testsuite.
+- **Raspberry-Pi-Betrieb** (Docker + Tasten-Dienst) ungetestet, siehe
+  [Betrieb auf dem Raspberry Pi](#betrieb-auf-dem-raspberry-pi).
 - **Dockerfile ungebaut/ungetestet** in dieser Entwicklungsumgebung (siehe
   oben) — vor Produktivbetrieb einmal real durchspielen.
 

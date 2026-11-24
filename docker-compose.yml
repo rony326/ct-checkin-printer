@@ -10,6 +10,9 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY fehlt — siehe .env.example}
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET fehlt — siehe .env.example}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Ohne TZ läuft der Container auf UTC ("heute 00:00", Uhrzeiten auf der Liste
+      # und activeTimes-Fenster wären um 1-2 h verschoben).
+      TZ: ${TZ:-Europe/Zurich}
     volumes:
       # SQLite-Datei + Font-/Logo-Uploads liegen beide unter diesem einen
       # Verzeichnis (siehe storage/uploadsDir.ts: <DB_PATH-Verzeichnis>/uploads/),
