@@ -46,7 +46,7 @@ Dafür ist kein Code nötig.
 
 | Muster | Bedeutung |
 |---|---|
-| 3× kurz blinken | Tastendruck erkannt |
+| 3× kurz blinken | Dienst gestartet, bereit |
 | langsam blinken (0,5 s) | Druck läuft, bitte warten |
 | 5 s dauerhaft an | Erfolgreich gedruckt |
 | 2× langsam blinken (1 s an / 0,5 s aus) | Nichts zu drucken (leere Liste) |

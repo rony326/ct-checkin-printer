@@ -8,7 +8,7 @@ from signal import pause
 
 from gpiozero import LED, Button
 
-from button_logic import TriggerController, call_trigger
+from button_logic import TriggerController, call_trigger, show_ready
 
 
 def log(message: str) -> None:
@@ -32,6 +32,7 @@ def main() -> int:
     # läuft deshalb in einem Worker-Thread.
     button.when_pressed = lambda: threading.Thread(target=controller.on_press, daemon=True).start()
 
+    show_ready(led)
     log(f"Tasten-Dienst bereit (Taster GPIO{button_pin}, LED GPIO{led_pin})")
     pause()
     return 0

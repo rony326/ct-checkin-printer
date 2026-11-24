@@ -4,7 +4,7 @@ import threading
 import unittest
 import urllib.error
 
-from button_logic import Outcome, TriggerController, call_trigger
+from button_logic import Outcome, TriggerController, call_trigger, show_ready
 
 
 class FakeResponse:
@@ -137,8 +137,7 @@ class ControllerTest(unittest.TestCase):
     def test_led_patterns_per_outcome(self):
         c, led, sleeps, _ = self.make(lambda: Outcome.SUCCESS)
         c.on_press()
-        self.assertEqual(led.calls[0], ("blink", 0.15, 0.15, 3))
-        self.assertIn(("blink", 0.5, 0.5, None), led.calls)
+        self.assertEqual(led.calls[0], ("blink", 0.5, 0.5, None))
         self.assertEqual(led.calls[-2:], [("on",), ("off",)])
         self.assertEqual(sleeps, [5])
 
@@ -151,6 +150,11 @@ class ControllerTest(unittest.TestCase):
         c.on_press()
         self.assertEqual(led.calls[-2:], [("blink", 0.1, 0.1, None), ("off",)])
         self.assertEqual(sleeps, [10])
+
+    def test_show_ready_blinks_three_times_short(self):
+        led = FakeLed()
+        show_ready(led)
+        self.assertEqual(led.calls, [("blink", 0.15, 0.15, 3)])
 
     def test_next_press_works_after_error(self):
         results = iter([Outcome.ERROR, Outcome.SUCCESS])

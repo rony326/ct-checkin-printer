@@ -44,6 +44,11 @@ def call_trigger(url: str, secret: str, timeout: float = 60, opener=urllib.reque
         return Outcome.ERROR
 
 
+def show_ready(led: LedLike) -> None:
+    """Dienst gestartet: 3x kurz blinken (bereit)."""
+    led.blink(0.15, 0.15, n=3)
+
+
 class TriggerController:
     SUCCESS_HOLD = 5
     ERROR_HOLD = 10
@@ -75,7 +80,6 @@ class TriggerController:
         hold = 0
         try:
             self._log("Taster gedrückt: löse Sammelausdruck aus")
-            self._led.blink(0.15, 0.15, n=3, background=False)
             self._led.blink(0.5, 0.5)
             try:
                 outcome = self._trigger()
