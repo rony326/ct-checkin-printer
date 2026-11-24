@@ -170,6 +170,10 @@ export const summaryLayouts = sqliteTable('summary_layouts', {
     .notNull()
     .default('manual'),
   verifyAgainstCt: integer('verify_against_ct', { mode: 'boolean' }).notNull().default(false),
+  // Hardware-Taster-Zugang: öffentlicher Token (URL), verschlüsseltes Secret (HMAC), Freigabe-Schalter.
+  triggerToken: text('trigger_token').unique(),
+  triggerSecretEnc: text('trigger_secret_enc'),
+  triggerEnabled: integer('trigger_enabled', { mode: 'boolean' }).notNull().default(false),
   ...timestamps,
 });
 

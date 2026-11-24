@@ -22,7 +22,7 @@ describe('printer_groups Migration', () => {
     const migrationsDir = path.join(import.meta.dirname, '../../migrations');
     const journal = JSON.parse(readFileSync(path.join(migrationsDir, 'meta/_journal.json'), 'utf8'));
     const baselineEntries = journal.entries.filter(
-      (e: { tag: string }) => !e.tag.startsWith('0005_') && !e.tag.startsWith('0006_') && !e.tag.startsWith('0007_'),
+      (e: { tag: string }) => !e.tag.startsWith('0005_') && !e.tag.startsWith('0006_') && !e.tag.startsWith('0007_') && !e.tag.startsWith('0008_'),
     );
     cpSync(migrationsDir, baselineDir, { recursive: true });
     for (const entry of journal.entries) {
@@ -98,5 +98,35 @@ describe('printer_groups Migration', () => {
     expect(printLogRows).toHaveLength(1);
     expect(labelLayoutRows[0]!.printer_id).toBe(1);
     expect(summaryLayoutRows[0]!.printer_id).toBe(2);
+  });
+});
+
+describe('summary_layouts Taster-Zugang Migration', () => {
+  it('adds trigger columns to summary_layouts with trigger_enabled defaulting to false', () => {
+    tmpDir = mkdtempSync(path.join(tmpdir(), 'ct-checkin-printer-migtest-'));
+    const dbPath = path.join(tmpDir, 'app.db');
+    const migrationsDir = path.join(import.meta.dirname, '../../migrations');
+
+    const db = createDb(dbPath, { foreignKeys: false });
+    migrate(db, { migrationsFolder: migrationsDir });
+
+    const raw = new Database(dbPath);
+    // Zeile ohne die neuen Felder: Defaults müssen greifen.
+    raw.prepare(`INSERT INTO summary_layouts (name) VALUES ('Alt-Layout')`).run();
+    const row = raw.prepare('SELECT trigger_token, trigger_secret_enc, trigger_enabled FROM summary_layouts').get() as {
+      trigger_token: string | null;
+      trigger_secret_enc: string | null;
+      trigger_enabled: number;
+    };
+
+    expect(row.trigger_token).toBeNull();
+    expect(row.trigger_secret_enc).toBeNull();
+    expect(row.trigger_enabled).toBe(0);
+
+    // trigger_token ist eindeutig (mehrere NULLs bleiben erlaubt).
+    raw.prepare(`INSERT INTO summary_layouts (name, trigger_token) VALUES ('A', 'tok')`).run();
+    expect(() => raw.prepare(`INSERT INTO summary_layouts (name, trigger_token) VALUES ('B', 'tok')`).run()).toThrow(/UNIQUE/);
+    raw.prepare(`INSERT INTO summary_layouts (name) VALUES ('C')`).run();
+    raw.close();
   });
 });
