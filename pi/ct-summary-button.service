@@ -1,0 +1,14 @@
+[Unit]
+Description=CT Check-in Printer: Taster für den Sammelausdruck
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/ct-summary-button.env
+ExecStart=/usr/bin/python3 /opt/ct-summary-button/summary_button.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
