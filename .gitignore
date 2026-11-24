@@ -11,3 +11,5 @@ __pycache__/
 *.tsbuildinfo
 logs/
 *.log
+.claude/worktrees/
+.superpowers/
