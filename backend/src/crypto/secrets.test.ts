@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { decryptSecret, encryptSecret } from './secrets.js';
+import { decryptSecret, encryptSecret, secretsEqual } from './secrets.js';
 
 describe('secrets encryption', () => {
   const key = randomBytes(32).toString('base64');
@@ -25,5 +25,20 @@ describe('secrets encryption', () => {
 
   it('rejects a key that is not 32 bytes', () => {
     expect(() => encryptSecret('secret', 'dG9vc2hvcnQ=')).toThrow(/32 Bytes/);
+  });
+});
+
+describe('secretsEqual', () => {
+  it('returns true for equal strings', () => {
+    expect(secretsEqual('abc123', 'abc123')).toBe(true);
+  });
+  it('returns false for different strings of the same length', () => {
+    expect(secretsEqual('abc123', 'abc124')).toBe(false);
+  });
+  it('returns false for different lengths without throwing', () => {
+    expect(secretsEqual('abc', 'abc123')).toBe(false);
+  });
+  it('returns false for an empty string versus a value', () => {
+    expect(secretsEqual('', 'abc')).toBe(false);
   });
 });

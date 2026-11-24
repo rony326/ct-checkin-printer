@@ -5,11 +5,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { PNG } from 'pngjs';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { seedMediaTypes } from '../db/seed.js';
 import { createDb, type Db } from '../db/client.js';
 import type { Env } from '../env.js';
 import { printerGroups, printers } from '../db/schema.js';
+import type { GenerateSummaryResult } from '../orchestrator/SummaryReportService.js';
+import { noopOrchestrator, type OrchestratorLike } from '../orchestrator/orchestratorLike.js';
 import { buildServer } from './server.js';
 
 let app: FastifyInstance;
@@ -544,6 +546,176 @@ describe('Summary-Layouts API', () => {
     const res = await app.inject({ method: 'POST', url: `/api/summary-layouts/${id}/print`, headers: { cookie: sessionCookie } });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ ok: false, message: 'Orchestrator nicht verfügbar', groupsPrinted: 0, groupsFailed: 0, empty: false });
+  });
+});
+
+describe('Summary-Trigger API', () => {
+  const okResult: GenerateSummaryResult = { ok: true, groupsPrinted: 2, groupsFailed: 0, empty: false };
+  let triggerApp: FastifyInstance;
+  const triggerMock = vi.fn<OrchestratorLike['triggerManualSummary']>();
+  let layoutId: number;
+  let token: string;
+  let secret: string;
+
+  const adminHeaders = () => ({ cookie: sessionCookie, 'content-type': 'application/json' });
+
+  async function enableTrigger(payload: Record<string, unknown>) {
+    return app.inject({ method: 'POST', url: `/api/summary-layouts/${layoutId}/trigger`, headers: adminHeaders(), payload });
+  }
+  const callTrigger = (bearer?: string, t: string = token) =>
+    triggerApp.inject({ method: 'POST', url: `/api/summary-trigger/${t}`, ...(bearer ? { headers: { authorization: `Bearer ${bearer}` } } : {}) });
+
+  beforeAll(async () => {
+    const env: Env = {
+      DB_PATH: path.join(tmpDir, 'test.db'),
+      APP_PORT: 0,
+      APP_HOST: '127.0.0.1',
+      ENCRYPTION_KEY: (app as unknown as { env: Env }).env.ENCRYPTION_KEY,
+      SESSION_SECRET: (app as unknown as { env: Env }).env.SESSION_SECRET,
+      LOG_LEVEL: 'error',
+    };
+    triggerApp = await buildServer(db, env, { ...noopOrchestrator, triggerManualSummary: triggerMock });
+    await triggerApp.ready();
+
+    const [group] = db.insert(printerGroups).values({ name: 'TriggerBand', hostname: 'TRIG1' }).returning().all();
+    const [leg] = db.insert(printers).values({ groupId: group!.id, name: 'TriggerBand', vendor: 'brother-ql', host: '192.168.1.95' }).returning().all();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/summary-layouts',
+      headers: adminHeaders(),
+      payload: { name: 'Taster-Layout', printerId: leg!.id },
+    });
+    layoutId = createRes.json().id;
+  });
+
+  afterAll(async () => {
+    await triggerApp.close();
+  });
+
+  it('requires a session for the trigger admin routes', async () => {
+    const post = await app.inject({ method: 'POST', url: `/api/summary-layouts/${layoutId}/trigger`, payload: { enabled: true } });
+    expect(post.statusCode).toBe(401);
+    const get = await app.inject({ method: 'GET', url: `/api/summary-layouts/${layoutId}/trigger/secret` });
+    expect(get.statusCode).toBe(401);
+  });
+
+  it('returns 404 for an unknown token', async () => {
+    const res = await callTrigger('whatever', 'doesnotexist');
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBeTruthy();
+  });
+
+  it('returns 404 when the trigger is disabled', async () => {
+    const res = await enableTrigger({ enabled: false });
+    expect(res.statusCode).toBe(200);
+    token = res.json().triggerToken;
+    secret = res.json().secret;
+    expect(token).toMatch(/^[0-9a-f]{32}$/);
+    expect(secret).toBeTruthy();
+    expect(res.json().triggerEnabled).toBe(false);
+
+    const call = await callTrigger(secret);
+    expect(call.statusCode).toBe(404);
+  });
+
+  it('returns 401 for a missing or wrong secret', async () => {
+    await enableTrigger({ enabled: true });
+    expect((await callTrigger()).statusCode).toBe(401);
+    expect((await callTrigger('wrong-secret')).statusCode).toBe(401);
+    expect(triggerMock).not.toHaveBeenCalled();
+  });
+
+  it('returns the secret via the admin route and keeps the same token on a second call', async () => {
+    const res = await app.inject({ method: 'GET', url: `/api/summary-layouts/${layoutId}/trigger/secret`, headers: { cookie: sessionCookie } });
+    expect(res.json()).toEqual({ secret });
+    const again = await enableTrigger({ enabled: true });
+    expect(again.json().triggerToken).toBe(token);
+    expect(again.json().secret).toBeUndefined();
+  });
+
+  it('accepts a POST without body and without content-type and returns the summary result', async () => {
+    triggerMock.mockResolvedValueOnce(okResult);
+    const before = new Date();
+    const res = await callTrigger(secret);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(okResult);
+    expect(triggerMock).toHaveBeenCalledTimes(1);
+    const [id, since, until] = triggerMock.mock.calls[0]!;
+    expect(id).toBe(layoutId);
+    const startOfToday = new Date(before);
+    startOfToday.setHours(0, 0, 0, 0);
+    expect(since.getTime()).toBe(startOfToday.getTime());
+    expect(until.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    triggerMock.mockReset();
+  });
+
+  it('passes ok:false results through as 200', async () => {
+    triggerMock.mockResolvedValueOnce({ ok: false, message: 'Orchestrator läuft nicht', groupsPrinted: 0, groupsFailed: 0, empty: false });
+    const res = await callTrigger(secret);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ok).toBe(false);
+    triggerMock.mockReset();
+  });
+
+  it('returns 409 while a summary for the same layout is still printing', async () => {
+    let release!: (r: GenerateSummaryResult) => void;
+    triggerMock.mockReturnValueOnce(new Promise<GenerateSummaryResult>((resolve) => (release = resolve)));
+    const first = callTrigger(secret);
+    await vi.waitFor(() => expect(triggerMock).toHaveBeenCalledTimes(1));
+
+    const second = await callTrigger(secret);
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toEqual({ error: 'Sammelausdruck läuft bereits' });
+    expect(triggerMock).toHaveBeenCalledTimes(1);
+
+    release(okResult);
+    expect((await first).statusCode).toBe(200);
+
+    triggerMock.mockResolvedValueOnce(okResult);
+    expect((await callTrigger(secret)).statusCode).toBe(200);
+    triggerMock.mockReset();
+  });
+
+  it('blocks the GUI /print endpoint while a trigger print is running', async () => {
+    let release!: (r: GenerateSummaryResult) => void;
+    triggerMock.mockReturnValueOnce(new Promise<GenerateSummaryResult>((resolve) => (release = resolve)));
+    const first = callTrigger(secret);
+    await vi.waitFor(() => expect(triggerMock).toHaveBeenCalledTimes(1));
+
+    const loginRes = await triggerApp.inject({ method: 'POST', url: '/api/auth/login', payload: { password: 'correcthorsebatterystaple' } });
+    const c = loginRes.cookies.find((x) => x.name === 'sessionId')!;
+    const print = await triggerApp.inject({ method: 'POST', url: `/api/summary-layouts/${layoutId}/print`, headers: { cookie: `${c.name}=${c.value}` } });
+    expect(print.statusCode).toBe(409);
+
+    release(okResult);
+    await first;
+    triggerMock.mockReset();
+  });
+
+  it('rejects the old secret after regenerateSecret', async () => {
+    const res = await enableTrigger({ regenerateSecret: true });
+    expect(res.statusCode).toBe(200);
+    const newSecret = res.json().secret;
+    expect(newSecret).toBeTruthy();
+    expect(newSecret).not.toBe(secret);
+    expect(res.json().triggerToken).toBe(token);
+
+    expect((await callTrigger(secret)).statusCode).toBe(401);
+    triggerMock.mockResolvedValueOnce(okResult);
+    expect((await callTrigger(newSecret)).statusCode).toBe(200);
+    triggerMock.mockReset();
+    secret = newSecret;
+  });
+
+  it('never exposes triggerSecretEnc in layout listings', async () => {
+    const list = await app.inject({ method: 'GET', url: '/api/summary-layouts', headers: { cookie: sessionCookie } });
+    expect(list.body).not.toContain('triggerSecretEnc');
+    const row = list.json().find((l: { id: number }) => l.id === layoutId);
+    expect(row.hasTriggerSecret).toBe(true);
+
+    const single = await app.inject({ method: 'GET', url: `/api/summary-layouts/${layoutId}`, headers: { cookie: sessionCookie } });
+    expect(single.body).not.toContain('triggerSecretEnc');
+    expect(single.json().hasTriggerSecret).toBe(true);
   });
 });
 

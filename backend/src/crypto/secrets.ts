@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -36,4 +36,12 @@ export function decryptSecret(encoded: string, encryptionKeyBase64: string): str
   decipher.setAuthTag(Buffer.from(authTagB64, 'base64'));
   const plaintext = Buffer.concat([decipher.update(Buffer.from(ciphertextB64, 'base64')), decipher.final()]);
   return plaintext.toString('utf8');
+}
+
+/** Zeitkonstanter Vergleich zweier Secrets; ungleiche Länge ergibt `false` (timingSafeEqual würde sonst werfen). */
+export function secretsEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
 }
