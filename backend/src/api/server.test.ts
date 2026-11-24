@@ -543,7 +543,7 @@ describe('Summary-Layouts API', () => {
 
     const res = await app.inject({ method: 'POST', url: `/api/summary-layouts/${id}/print`, headers: { cookie: sessionCookie } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ ok: false, message: 'Orchestrator nicht verfügbar', groupsPrinted: 0 });
+    expect(res.json()).toEqual({ ok: false, message: 'Orchestrator nicht verfügbar', groupsPrinted: 0, groupsFailed: 0, empty: false });
   });
 });
 

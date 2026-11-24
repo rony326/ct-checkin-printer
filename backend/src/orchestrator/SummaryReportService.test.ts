@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
 import { documentPrinters, mediaTypes, printerGroups, printLog, printers, summaryLayouts } from '../db/schema.js';
 import type { LabelPrinterAdapter } from '../adapters/printer/types.js';
@@ -53,6 +54,8 @@ describe('SummaryReportService.generate — Endlosband-Ausgabe', () => {
     const result = await service.generate(layout!.id, ...WIDE_WINDOW);
 
     expect(result.ok).toBe(true);
+    expect(result.groupsFailed).toBe(0);
+    expect(result.empty).toBe(false);
     expect(result.groupsPrinted).toBe(2); // Kids, Teens — der fehlgeschlagene Druck zählt nicht mit
     expect(label.adapter.printLabel).toHaveBeenCalledTimes(2);
   });
@@ -67,6 +70,9 @@ describe('SummaryReportService.generate — Endlosband-Ausgabe', () => {
     const result = await service.generate(layout!.id, ...WIDE_WINDOW);
 
     expect(result.groupsPrinted).toBe(0);
+    expect(result.empty).toBe(true);
+    expect(result.ok).toBe(true);
+    expect(result.groupsFailed).toBe(0);
     expect(label.adapter.printLabel).not.toHaveBeenCalled();
   });
 
@@ -110,5 +116,85 @@ describe('SummaryReportService.generate — Fehlerfälle', () => {
     const service = new SummaryReportService({ db, labelAdapters: fakeLabelAdapter(), documentAdapters: fakeDocumentAdapter() });
     const result = await service.generate(9999, new Date(), new Date());
     expect(result.ok).toBe(false);
+  });
+
+  function setupDocPrinterLayout(groups: string[]) {
+    const [printerGroup] = db.insert(printerGroups).values({ name: 'B1', hostname: 'B1' }).returning().all();
+    const printer = db.insert(printers).values({ groupId: printerGroup!.id, name: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).returning().all()[0]!;
+    const docPrinter = db.insert(documentPrinters).values({ name: 'Büro', host: '10.0.0.50' }).returning().all()[0]!;
+    for (const groupName of groups) insertPrintLog({ printerId: printer.id, groupName });
+    const [layout] = db.insert(summaryLayouts).values({ name: 'Sammel', documentPrinterId: docPrinter.id }).returning().all();
+    return { layout: layout!, docPrinter };
+  }
+
+  it('reports ok:false with the printer error when the document printer fails', async () => {
+    const { layout } = setupDocPrinterLayout(['Kids']);
+    const documentAdapters = fakeDocumentAdapter();
+    (documentAdapters.adapter.printDocument as ReturnType<typeof vi.fn>).mockResolvedValue({ success: false, errorMessage: 'IPP: connection refused' });
+    const service = new SummaryReportService({ db, labelAdapters: fakeLabelAdapter(), documentAdapters });
+
+    const result = await service.generate(layout.id, ...WIDE_WINDOW);
+
+    expect(result.ok).toBe(false);
+    expect(result.groupsPrinted).toBe(0);
+    expect(result.groupsFailed).toBe(1);
+    expect(result.message).toContain('IPP: connection refused');
+    expect(result.message).toContain('Kids');
+  });
+
+  it('keeps printing remaining groups after one group fails', async () => {
+    const { layout } = setupDocPrinterLayout(['Kids', 'Teens']);
+    const documentAdapters = fakeDocumentAdapter();
+    (documentAdapters.adapter.printDocument as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ success: false, errorMessage: 'Papierstau' })
+      .mockResolvedValueOnce({ success: true });
+    const service = new SummaryReportService({ db, labelAdapters: fakeLabelAdapter(), documentAdapters });
+
+    const result = await service.generate(layout.id, ...WIDE_WINDOW);
+
+    expect(documentAdapters.adapter.printDocument).toHaveBeenCalledTimes(2);
+    expect(result.groupsPrinted).toBe(1);
+    expect(result.groupsFailed).toBe(1);
+    expect(result.ok).toBe(false);
+  });
+
+  it('treats a thrown adapter error as a failed group', async () => {
+    const { layout } = setupDocPrinterLayout(['Kids']);
+    const documentAdapters = fakeDocumentAdapter();
+    (documentAdapters.adapter.printDocument as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('socket hang up'));
+    const service = new SummaryReportService({ db, labelAdapters: fakeLabelAdapter(), documentAdapters });
+
+    const result = await service.generate(layout.id, ...WIDE_WINDOW);
+
+    expect(result.ok).toBe(false);
+    expect(result.groupsFailed).toBe(1);
+    expect(result.message).toContain('socket hang up');
+  });
+
+  it('reports ok:false when the referenced document printer no longer exists', async () => {
+    const { layout, docPrinter } = setupDocPrinterLayout(['Kids']);
+    db.$client.pragma('foreign_keys = OFF');
+    db.delete(documentPrinters).where(eq(documentPrinters.id, docPrinter.id)).run();
+    const service = new SummaryReportService({ db, labelAdapters: fakeLabelAdapter(), documentAdapters: fakeDocumentAdapter() });
+
+    const result = await service.generate(layout.id, ...WIDE_WINDOW);
+
+    expect(result.ok).toBe(false);
+    expect(result.groupsFailed).toBe(1);
+  });
+
+  it('reports ok:false when the label printer has no media', async () => {
+    const [printerGroup] = db.insert(printerGroups).values({ name: 'B1', hostname: 'B1' }).returning().all();
+    const printer = db.insert(printers).values({ groupId: printerGroup!.id, name: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).returning().all()[0]!;
+    insertPrintLog({ printerId: printer.id });
+    const [layout] = db.insert(summaryLayouts).values({ name: 'Sammel', printerId: printer.id }).returning().all();
+    const label = fakeLabelAdapter();
+    const service = new SummaryReportService({ db, labelAdapters: label, documentAdapters: fakeDocumentAdapter() });
+
+    const result = await service.generate(layout!.id, ...WIDE_WINDOW);
+
+    expect(result.ok).toBe(false);
+    expect(result.groupsFailed).toBe(1);
+    expect(label.adapter.printLabel).not.toHaveBeenCalled();
   });
 });

@@ -150,7 +150,7 @@ export class PrintOrchestrator {
 
   /** Für den manuellen Sammelausdruck-Button im GUI (`trigger: 'manual'`, siehe Plan). */
   async triggerManualSummary(summaryLayoutId: number, since: Date, until: Date): Promise<GenerateSummaryResult> {
-    if (!this.summaryReportService) return { ok: false, message: 'Orchestrator läuft nicht', groupsPrinted: 0 };
+    if (!this.summaryReportService) return { ok: false, message: 'Orchestrator läuft nicht', groupsPrinted: 0, groupsFailed: 0, empty: false };
     return this.summaryReportService.generate(summaryLayoutId, since, until);
   }
 

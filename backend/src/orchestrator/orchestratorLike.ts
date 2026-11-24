@@ -1,3 +1,5 @@
+import type { GenerateSummaryResult } from './SummaryReportService.js';
+
 /** Spiegelt `PrinterPoller.status()` — hier neu definiert statt importiert, damit dieses File von der Orchestrator-Implementierung entkoppelt bleibt. */
 export interface OrchestratorPollerStatus {
   groupId: number;
@@ -23,7 +25,7 @@ export interface OrchestratorLike {
   /** Übernimmt Änderungen an Druckern/ChurchTools-Verbindung, ohne den Prozess neu zu starten. */
   reload(): Promise<void>;
   /** "Sammelausdruck jetzt drucken" (Bauschritt 10, siehe Plan). */
-  triggerManualSummary(summaryLayoutId: number, since: Date, until: Date): Promise<{ ok: boolean; message?: string; groupsPrinted: number }>;
+  triggerManualSummary(summaryLayoutId: number, since: Date, until: Date): Promise<GenerateSummaryResult>;
   /** Live-Status aller Poller fürs Dashboard (`api/dashboard.ts`). */
   status(): OrchestratorStatus;
 }
@@ -35,7 +37,7 @@ export const noopOrchestrator: OrchestratorLike = {
   },
   async reload() {},
   async triggerManualSummary() {
-    return { ok: false, message: 'Orchestrator nicht verfügbar', groupsPrinted: 0 };
+    return { ok: false, message: 'Orchestrator nicht verfügbar', groupsPrinted: 0, groupsFailed: 0, empty: false };
   },
   status() {
     return { pollers: [] };
