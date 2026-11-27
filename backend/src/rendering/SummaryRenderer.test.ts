@@ -1,3 +1,4 @@
+import { createCanvas } from '@napi-rs/canvas';
 import PDFDocument from 'pdfkit';
 import { PNG } from 'pngjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -91,6 +92,7 @@ interface DrawnText {
   y: number;
   width: number;
   height: number;
+  size: number;
   pageWidth: number;
   pageHeight: number;
 }
@@ -102,7 +104,8 @@ function recordTexts(): DrawnText[] {
   vi.spyOn(PDFDocument.prototype, 'text').mockImplementation(function (this: PDFKit.PDFDocument, ...args: unknown[]) {
     const [text, x, y, options] = args as [string, number, number, { width: number }];
     const height = this.heightOfString(text, { width: options.width });
-    drawn.push({ text, page: this.page, x, y, width: options.width, height, pageWidth: this.page.width, pageHeight: this.page.height });
+    const size = (this as unknown as { _fontSize: number })._fontSize;
+    drawn.push({ text, page: this.page, x, y, width: options.width, height, size, pageWidth: this.page.width, pageHeight: this.page.height });
     return original.apply(this, args);
   });
   return drawn;
@@ -115,6 +118,14 @@ function wideLogo(): Buffer {
   const png = new PNG({ width: 40, height: 16 });
   png.data.fill(128);
   return PNG.sync.write(png);
+}
+
+function jpegLogo(): Buffer {
+  const canvas = createCanvas(200, 100);
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#c33';
+  context.fillRect(0, 0, 100, 100);
+  return canvas.toBuffer('image/jpeg');
 }
 
 /** Gültig aufgebautes PNG mit Alphakanal, dessen Bilddaten zerstört sind. */
@@ -318,9 +329,67 @@ describe('renderSummaryPdf', () => {
     expect(pdf.toString('latin1')).not.toContain('/Subtype /Image');
   });
 
-  it('embeds a valid logo', async () => {
+  it('embeds a valid PNG logo', async () => {
     const pdf = await renderSummaryPdf(pdfInput({ logo: wideLogo() }));
     expect(pdf.toString('latin1')).toContain('/Subtype /Image');
+  });
+
+  it('embeds a valid JPEG logo once for all pages', async () => {
+    const pdf = await renderSummaryPdf(pdfInput({ rows: manyRows(60), logo: jpegLogo() }));
+
+    expect(countPages(pdf)).toBeGreaterThan(1);
+    expect(pdf.toString('latin1').match(/\/DCTDecode/g)).toHaveLength(1);
+  });
+
+  // Diese Eingaben bringen den Bilddekoder von @napi-rs/canvas zum Absturz (Segfault, kein abfangbarer Fehler).
+  it.each([
+    ['a JPEG truncated to 100 bytes', () => jpegLogo().subarray(0, 100)],
+    ['a JPEG truncated at half its length', () => jpegLogo().subarray(0, jpegLogo().length / 2)],
+    ['a JPEG missing its last bytes', () => jpegLogo().subarray(0, -10)],
+    ['a JPEG consisting of an empty segment', () => Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0])],
+    ['a WebP header', () => Buffer.from('RIFFxxxxWEBP')],
+    ['a truncated PNG', () => wideLogo().subarray(0, 40)],
+  ])('prints without logo for %s', async (_label, logo) => {
+    const pdf = await renderSummaryPdf(pdfInput({ logo: logo() }));
+    expect(countPages(pdf)).toBe(1);
+    expect(pdf.toString('latin1')).not.toContain('/Subtype /Image');
+  });
+
+  const CROWDED_CHECKS = ['Abgeholt', 'Anwesend', 'Jacke', 'Allergie'];
+
+  it.each(['portrait', 'landscape'] as const)('splits no name word and gives name and guest column the most space (%s, 18 pt, 4 check columns)', async (orientation) => {
+    const lines = vi.spyOn(PDFDocument.prototype as unknown as { _fragment: (line: string) => void }, '_fragment');
+    const drawn = recordTexts();
+    const names = ['Maximilian Mustermann', 'Gast 1 Youngsters', 'Anna-Magdalena Schwarzenberger', 'Muster, Erika'];
+    const rows = Array.from({ length: 40 }, (_, i) => ({ name: names[i % names.length]!, code: 'QXWM', checkinTime: '10:01', isGuest: i % 4 === 1 }));
+
+    const pdf = await renderSummaryPdf(pdfInput({ rows, design: { orientation, fontSize: 18, checkColumns: CROWDED_CHECKS } }));
+
+    const drawnWords = new Set(lines.mock.calls.flatMap(([line]) => line.trim().split(/\s+/)));
+    for (const word of ['Maximilian', 'Mustermann', 'Youngsters', 'Schwarzenberger', 'Muster,', 'Erika', 'QXWM', '10:01']) {
+      expect(drawnWords, word).toContain(word);
+    }
+    const widthOf = (text: string) => drawn.find((d) => d.text === text)!.width;
+    for (const other of [...CROWDED_CHECKS, 'Code', 'Zeit']) {
+      expect(widthOf('Name'), other).toBeGreaterThan(widthOf(other));
+      expect(widthOf('Name Gast'), other).toBeGreaterThan(widthOf(other));
+    }
+    expect(countPages(pdf)).toBe(new Set(drawn.map((d) => d.page)).size);
+    for (const d of drawn) {
+      expect(d.x + d.width, d.text).toBeLessThanOrEqual(d.pageWidth);
+      expect(d.y + d.height, d.text).toBeLessThanOrEqual(d.pageHeight);
+    }
+  });
+
+  it('keeps the table font size when one name has a word wider than the page', async () => {
+    const drawn = recordTexts();
+    const endless = 'X'.repeat(120);
+    const rows = [endless, 'Maximilian Mustermann'].map((name) => ({ name, code: 'QXWM', checkinTime: '10:01' }));
+
+    await renderSummaryPdf(pdfInput({ rows, design: { orientation: 'portrait', fontSize: 14 } }));
+
+    expect(textsOf(drawn)).toContain(endless);
+    expect(drawn.find((d) => d.text === 'Maximilian Mustermann')!.size).toBe(14);
   });
 
   it('says so when there are no check-ins', async () => {

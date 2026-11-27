@@ -1,4 +1,4 @@
-import { createCanvas, loadImage, type SKRSContext2D } from '@napi-rs/canvas';
+import { createCanvas, type SKRSContext2D } from '@napi-rs/canvas';
 import PDFDocument from 'pdfkit';
 import { PNG } from 'pngjs';
 import type { MediaDefinition, RenderedBitmap } from '../adapters/printer/types.js';
@@ -114,6 +114,12 @@ const LOGO_MAX_HEIGHT = 16 * PT_PER_MM;
 const LOGO_MAX_WIDTH_SHARE = 0.2;
 const CHECK_COLUMN_MAX_SHARE = 0.12;
 const DATA_COLUMN_MAX_SHARE = 0.17;
+/** Bis auf diese Breite geben Abhak-Spalten Platz an Name und Gast-Spalte ab; breitere Überschriften brechen dann um. */
+const CHECK_COLUMN_FLOOR = 52;
+/** Schreibplatz für einen von Hand notierten Namen. */
+const GUEST_COLUMN_MIN_WIDTH = 32 * PT_PER_MM;
+/** Kleinste Schrift, auf welche die Tabelle für ungeteilte Namen verkleinert wird (Untergrenze der Einstellung). */
+const MIN_TABLE_FONT_SIZE = 8;
 const TITLE_MAX_HEIGHT_SHARE = 0.2;
 const FOOTER_MAX_HEIGHT_SHARE = 0.15;
 const FOOTER_FONT_SIZE = 9;
@@ -122,6 +128,14 @@ const MIN_HEADING_FONT_SIZE = 7;
 const REGULAR = 'regular';
 const BOLD = 'bold';
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+const JPEG_END = Buffer.from([0xff, 0xd9]);
+
+/** Von pdfkit geöffnetes Bild (in den Typdefinitionen nicht beschrieben). */
+interface PdfImage {
+  width: number;
+  height: number;
+  orientation?: number;
+}
 
 type TableColumn = { heading: string; x: number; width: number } & ({ kind: 'check' } | { kind: 'data'; key: SummaryColumnKey } | { kind: 'guest' });
 
@@ -154,39 +168,93 @@ function drawLine(doc: PDFKit.PDFDocument, x1: number, y1: number, x2: number, y
   doc.moveTo(x1, y1).lineTo(x2, y2).lineWidth(lineWidth).strokeColor(color).stroke();
 }
 
-/** Reihenfolge: Abhak-Spalten, Datenspalten, Gast-Spalte. Name und Gast-Spalte teilen sich die Restbreite. */
-function layoutColumns(doc: PDFKit.PDFDocument, input: SummaryPdfInput, contentWidth: number): TableColumn[] {
-  const { design, rows } = input;
-  const widthOf = (text: string, font: TextBlock['font']) => doc.font(font).fontSize(design.fontSize).widthOfString(text) + 2 * CELL_PADDING + 1;
+/** Wörter samt folgendem Leerzeichen bzw. Bindestrich: an diesen Stellen bricht pdfkit um, und so breit misst es sie. */
+function splitWords(text: string): string[] {
+  return text.match(/[^\s-]+[\s-]*|[\s-]+/g) ?? [];
+}
 
-  const checks = design.checkColumns.map((heading) => ({
-    kind: 'check' as const,
-    heading,
-    width: Math.min(Math.max(widthOf(heading, BOLD), CHECKBOX_SIZE + 2 * CELL_PADDING), contentWidth * CHECK_COLUMN_MAX_SHARE),
-    weight: 0,
-  }));
+function widestWord(doc: PDFKit.PDFDocument, texts: string[], font: TextBlock['font'], size: number): number {
+  doc.font(font).fontSize(size);
+  return texts.flatMap(splitWords).reduce((widest, word) => Math.max(widest, doc.widthOfString(word)), 0);
+}
+
+/**
+ * Reihenfolge: Abhak-Spalten, Datenspalten, Gast-Spalte. Name und Gast-Spalte bekommen den meisten Platz: reicht er
+ * nicht, um die Namen zwischen den Wörtern umzubrechen, werden erst die Abhak-Spalten schmaler und dann die
+ * Tabellenschrift kleiner. Nur ein Wort, das auch dann nicht passt, wird innerhalb des Wortes umbrochen.
+ */
+function layoutColumns(doc: PDFKit.PDFDocument, input: SummaryPdfInput, contentWidth: number): { columns: TableColumn[]; fontSize: number } {
+  const { design, rows } = input;
+  const padding = 2 * CELL_PADDING + 1;
   // Doppelt gewählte Spalten erscheinen einmal, sonst könnte die Tabelle breiter als die Seite werden.
   const unique = [...new Map(input.columns.map((column) => [column.key, column])).values()];
-  const data = unique.map(({ key, label }) => {
-    if (key === 'name') return { kind: 'data' as const, key, heading: label, width: 0, weight: 3 };
-    const natural = rows.reduce((max, row) => Math.max(max, widthOf(row[key], REGULAR)), widthOf(label, BOLD));
-    return { kind: 'data' as const, key, heading: label, width: Math.min(natural, contentWidth * DATA_COLUMN_MAX_SHARE), weight: 0 };
-  });
-  const guest = design.guestColumn.enabled ? [{ kind: 'guest' as const, heading: design.guestColumn.header, width: 0, weight: 2 }] : [];
+  const nameColumn = unique.find((column) => column.key === 'name');
+  const guestMin = design.guestColumn.enabled ? GUEST_COLUMN_MIN_WIDTH : 0;
 
+  function measure(size: number) {
+    const widthOf = (text: string, font: TextBlock['font']) => doc.font(font).fontSize(size).widthOfString(text) + padding;
+    const checks = design.checkColumns.map((heading) => {
+      const box = CHECKBOX_SIZE + 2 * CELL_PADDING;
+      const preferred = Math.min(Math.max(widthOf(heading, BOLD), box), contentWidth * CHECK_COLUMN_MAX_SHARE);
+      const word = widestWord(doc, [heading], BOLD, MIN_HEADING_FONT_SIZE) + padding;
+      return { heading, preferred, floor: Math.min(preferred, Math.max(box, Math.min(word, CHECK_COLUMN_FLOOR))) };
+    });
+    const data = unique.map(({ key, label }) => {
+      if (key === 'name') return { key, label, width: 0 };
+      const natural = rows.reduce((max, row) => Math.max(max, widthOf(row[key], REGULAR)), widthOf(label, BOLD));
+      return { key, label, width: Math.min(natural, contentWidth * DATA_COLUMN_MAX_SHARE) };
+    });
+    const checkFloor = checks.reduce((sum, check) => sum + check.floor, 0);
+    const dataWidth = data.reduce((sum, column) => sum + column.width, 0);
+    return { size, checks, data, checkFloor, dataWidth };
+  }
+
+  // Wörter, die selbst bei kleinster Schrift nicht passen, verkleinern die Tabelle nicht.
+  const smallest = measure(Math.min(MIN_TABLE_FONT_SIZE, design.fontSize));
+  const roomAtSmallest = contentWidth - smallest.checkFloor - smallest.dataWidth - guestMin - padding;
+  const nameWords = [...new Set(rows.flatMap((row) => splitWords(row.name)))].filter(
+    (word) => widestWord(doc, [word], REGULAR, smallest.size) <= roomAtSmallest,
+  );
+  /** Mindestens so breit wie der Schreibplatz für Gäste, damit auch bei kurzen Namen keine Abhak-Spalte breiter wird. */
+  const requiredNameWidth = (size: number) =>
+    nameColumn
+      ? Math.max(GUEST_COLUMN_MIN_WIDTH, widestWord(doc, [nameColumn.label], BOLD, size) + padding, widestWord(doc, nameWords, REGULAR, size) + padding)
+      : 0;
+
+  let table = measure(design.fontSize);
+  while (table.size > smallest.size && table.checkFloor + table.dataWidth + requiredNameWidth(table.size) + guestMin > contentWidth) {
+    table = measure(Math.max(smallest.size, table.size - 0.5));
+  }
+
+  const nameMin = Math.min(requiredNameWidth(table.size), Math.max(0, contentWidth - table.checkFloor - table.dataWidth - guestMin));
+  const checkPreferred = table.checks.reduce((sum, check) => sum + check.preferred, 0);
+  const checkRoom = contentWidth - table.dataWidth - nameMin - guestMin;
+  const shrinkable = checkPreferred - table.checkFloor;
+  const keep = shrinkable > 0 ? Math.min(1, Math.max(0, (checkRoom - table.checkFloor) / shrinkable)) : 1;
+  const checks = table.checks.map(({ heading, preferred, floor }) => ({ kind: 'check' as const, heading, width: floor + (preferred - floor) * keep }));
+  const data = table.data.map(({ key, label, width }) => ({ kind: 'data' as const, key, heading: label, width }));
+  const guest = design.guestColumn.enabled ? [{ kind: 'guest' as const, heading: design.guestColumn.header, width: 0 }] : [];
   const columns = [...checks, ...data, ...guest];
+
+  // Die Restbreite teilen sich Name und Gast-Spalte 3:2, ohne ihre Mindestbreiten zu unterschreiten.
+  const rest = contentWidth - columns.reduce((sum, column) => sum + column.width, 0);
+  const guestWidth = !guest.length ? 0 : !nameColumn ? rest : Math.min(Math.max(rest * 0.4, guestMin), rest - nameMin);
+  for (const column of columns) {
+    if (column.kind === 'guest') column.width = guestWidth;
+    if (column.kind === 'data' && column.key === 'name') column.width = rest - guestWidth;
+  }
   // Ohne Name und Gast-Spalte dehnen sich alle Spalten, damit die Tabelle die Seite füllt.
-  if (columns.every((column) => column.weight === 0)) for (const column of columns) column.weight = 1;
-  const remaining = contentWidth - columns.reduce((sum, column) => sum + column.width, 0);
-  const totalWeight = columns.reduce((sum, column) => sum + column.weight, 0);
+  if (!nameColumn && !guest.length) for (const column of columns) column.width += rest / columns.length;
 
   let x = PAGE_MARGIN;
-  return columns.map(({ weight, ...column }) => {
-    const width = column.width + (weight ? (remaining * weight) / totalWeight : 0);
-    const placed = { ...column, x, width };
-    x += width;
-    return placed;
-  });
+  return {
+    fontSize: table.size,
+    columns: columns.map((column) => {
+      const placed = { ...column, x };
+      x += column.width;
+      return placed;
+    }),
+  };
 }
 
 /**
@@ -205,23 +273,64 @@ function measureHeading(doc: PDFKit.PDFDocument, text: string, fontSize: number,
 }
 
 /**
- * Prüft, dekodiert und verkleinert das Logo vorab: bei defekten PNG-Bilddaten wirft pdfkit ausserhalb jedes try/catch
- * (Absturz des Prozesses), und `loadImage` nimmt sie stillschweigend an — deshalb prüft `pngjs` PNGs zuerst.
+ * Prüft den Segmentaufbau eines JPEG: vollständige Segmente, ein Bildkopf (Baseline oder progressiv), Bilddaten und
+ * Endmarke. So gelangt keine abgeschnittene Datei in den Druckauftrag; dekodiert wird das Bild erst im Drucker.
  */
-async function prepareLogo(logo: Buffer | undefined): Promise<{ data: Buffer; width: number; height: number } | null> {
+function isCompleteJpeg(data: Buffer): boolean {
+  if (data[0] !== 0xff || data[1] !== 0xd8) return false;
+  let hasFrame = false;
+  let pos = 2;
+  while (pos + 4 <= data.length && data[pos] === 0xff) {
+    const marker = data[pos + 1]!;
+    if (marker === 0xff) {
+      pos += 1; // Füllbyte
+      continue;
+    }
+    const length = data.readUInt16BE(pos + 2);
+    const end = pos + 2 + length;
+    if (length < 2 || end > data.length) return false;
+    if (marker >= 0xc0 && marker <= 0xc2) {
+      if (length < 8) return false;
+      const [bits, height, width, channels] = [data[pos + 4], data.readUInt16BE(pos + 5), data.readUInt16BE(pos + 7), data[pos + 9]!];
+      if (bits !== 8 || height === 0 || width === 0 || ![1, 3, 4].includes(channels) || length !== 8 + 3 * channels) return false;
+      hasFrame = true;
+    }
+    if (marker === 0xda) return hasFrame && data.includes(JPEG_END, end);
+    pos = end;
+  }
+  return false;
+}
+
+/** Vollständig dekodiert (wirft bei defekten Daten) und als sauberes, auf Druckgrösse verkleinertes PNG neu geschrieben. */
+function normalizePng(data: Buffer): Buffer {
+  const decoded = PNG.sync.read(data);
+  const source = createCanvas(decoded.width, decoded.height);
+  const pixels = source.getContext('2d').createImageData(decoded.width, decoded.height);
+  pixels.data.set(decoded.data);
+  source.getContext('2d').putImageData(pixels, 0, 0);
+  // 4 Pixel je Punkt sind knapp 300 dpi — mehr Auflösung vergrössert nur den Druckauftrag.
+  const scale = Math.min(1, (LOGO_MAX_HEIGHT * 4) / decoded.height);
+  const canvas = createCanvas(Math.max(1, Math.round(decoded.width * scale)), Math.max(1, Math.round(decoded.height * scale)));
+  canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas.toBuffer('image/png');
+}
+
+/**
+ * Öffnet das Logo für pdfkit; `null` = ohne Logo drucken, die Liste ist wichtiger. Die Bytes gehen nie an den
+ * Bilddekoder von `@napi-rs/canvas` (Segfault bei defekten Dateien), und PNGs nur geprüft an pdfkit (das bei defekten
+ * Bilddaten ausserhalb jedes try/catch wirft).
+ */
+function openLogo(doc: PDFKit.PDFDocument, logo: Buffer | undefined): { source: PdfImage; width: number; height: number } | null {
   if (!logo) return null;
   try {
-    if (logo.subarray(0, 4).equals(PNG_MAGIC)) PNG.sync.read(logo);
-    const image = await loadImage(logo);
-    // 4 Pixel je Punkt sind knapp 300 dpi — mehr Auflösung vergrössert nur den Druckauftrag.
-    const scale = Math.min(1, (LOGO_MAX_HEIGHT * 4) / image.height);
-    const width = Math.max(1, Math.round(image.width * scale));
-    const height = Math.max(1, Math.round(image.height * scale));
-    const canvas = createCanvas(width, height);
-    canvas.getContext('2d').drawImage(image, 0, 0, width, height);
-    return { data: canvas.toBuffer('image/png'), width, height };
+    const data = logo.subarray(0, 4).equals(PNG_MAGIC) ? normalizePng(logo) : isCompleteJpeg(logo) ? logo : null;
+    if (!data) return null;
+    // Einmal geöffnet, bettet pdfkit das Bild nur einmal ein, auch wenn es auf jeder Seite steht.
+    const image = (doc as unknown as { openImage(source: Buffer): PdfImage }).openImage(data);
+    const rotated = (image.orientation ?? 1) > 4; // EXIF: um 90 Grad gedreht
+    return { source: image, width: rotated ? image.height : image.width, height: rotated ? image.width : image.height };
   } catch {
-    return null; // Defektes Logo: die Liste ist wichtiger und wird ohne Logo gedruckt.
+    return null;
   }
 }
 
@@ -235,9 +344,8 @@ function formatDateTime(date: Date): string {
  * A4-Anwesenheitsliste (Checkout und Evakuierung) für den IPP/Büro-Netzwerkdrucker-Pfad. Die Seiten werden selbst
  * umbrochen: Kopf und Tabellenkopf stehen auf jeder Seite, keine Zeile wird geteilt oder gekürzt.
  */
-export async function renderSummaryPdf(input: SummaryPdfInput): Promise<Buffer> {
+export function renderSummaryPdf(input: SummaryPdfInput): Promise<Buffer> {
   const { rows, design } = input;
-  const logo = await prepareLogo(input.logo);
 
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
@@ -260,6 +368,7 @@ export async function renderSummaryPdf(input: SummaryPdfInput): Promise<Buffer> 
     const rightEdge = pageWidth - PAGE_MARGIN;
 
     // Kopf: Logo links, daneben Titel und Anzahl, rechts der Druckzeitpunkt.
+    const logo = openLogo(doc, input.logo);
     const logoScale = logo ? Math.min(LOGO_MAX_HEIGHT / logo.height, (contentWidth * LOGO_MAX_WIDTH_SHARE) / logo.width) : 0;
     const logoWidth = logo ? logo.width * logoScale : 0;
     const logoHeight = logo ? logo.height * logoScale : 0;
@@ -280,14 +389,14 @@ export async function renderSummaryPdf(input: SummaryPdfInput): Promise<Buffer> 
     const footerTop = pageHeight - PAGE_MARGIN - Math.max(footer.height, pageLabelHeight);
     const bodyBottom = footerTop - GAP;
 
-    const columns = layoutColumns(doc, input, contentWidth);
-    const headings = columns.map((column) => measureHeading(doc, column.heading, design.fontSize, column.width - 2 * CELL_PADDING));
+    const { columns, fontSize } = layoutColumns(doc, input, contentWidth);
+    const headings = columns.map((column) => measureHeading(doc, column.heading, fontSize, column.width - 2 * CELL_PADDING));
     const rowsTop = PAGE_MARGIN + headerHeight + Math.max(0, ...headings.map((heading) => heading.height)) + 2 * CELL_PADDING;
 
     function drawPageHead(): void {
       if (logo) {
         try {
-          doc.image(logo.data, PAGE_MARGIN, PAGE_MARGIN, { width: logoWidth, height: logoHeight });
+          doc.image(logo.source as unknown as Buffer, PAGE_MARGIN, PAGE_MARGIN, { width: logoWidth, height: logoHeight });
         } catch {
           // Ohne Logo weiterdrucken.
         }
@@ -310,7 +419,7 @@ export async function renderSummaryPdf(input: SummaryPdfInput): Promise<Buffer> 
     drawPageHead();
     let y = rowsTop;
     for (const row of rows) {
-      let size = design.fontSize;
+      let size = fontSize;
       let { cells, textHeight } = measureRow(row, size);
       // Nur eine Zeile, die höher als eine ganze Seite wäre, wird kleiner gesetzt statt geteilt oder gekürzt.
       while (textHeight + 2 * CELL_PADDING > bodyBottom - rowsTop && size > 1) {
