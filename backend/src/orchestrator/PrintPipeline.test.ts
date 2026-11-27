@@ -134,6 +134,82 @@ describe('PrintPipeline.processIncomingJob', () => {
     expect(db.select().from(printQueue).all()).toHaveLength(0);
   });
 
+  it('logs a failed row when no layout matches the check-in type', async () => {
+    const printer = makePrinter('B1');
+    // Zweites Gerät derselben Gruppe — protokolliert wird auf dem ERSTEN.
+    db.insert(printers).values({ groupId: printer.groupId, name: 'B1-zwei', vendor: 'brother-ql', host: '10.0.0.2' }).run();
+    const pipeline = new PrintPipeline({ db, env, adapters: { getAdapter: async () => makeAdapter() } });
+
+    await pipeline.processIncomingJob(printer.hostname, RAW_DATA, () => 1735600000000);
+
+    const logs = db.select().from(printLog).all();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.status).toBe('failed');
+    expect(logs[0]!.printerId).toBe(printer.id);
+    expect(logs[0]!.labelType).toBe('parent');
+    expect(logs[0]!.errorMessage).toContain('Kein Layout');
+    expect(logs[0]!.personName).toBe('Max Muster');
+    expect(logs[0]!.code).toBe('ZRYK');
+    expect(logs[0]!.groupName).toBe('Kids');
+  });
+
+  it('logs a failed row when the layout has no printer', async () => {
+    const printer = makePrinter('B1');
+    const media = makeMedia();
+    const [primary] = db
+      .insert(labelLayouts)
+      .values({ name: 'Eltern', ctTypeKey: 'parent', printerId: printer.id, mediaId: media.id, elementsJson: STATIC_ELEMENTS })
+      .returning()
+      .all();
+    const [also] = db
+      .insert(labelLayouts)
+      .values({ name: 'Sammelzettel', ctTypeKey: 'summary', printerId: null, mediaId: media.id, elementsJson: STATIC_ELEMENTS })
+      .returning()
+      .all();
+    db.insert(labelLayoutAlso).values({ layoutId: primary!.id, alsoLayoutId: also!.id }).run();
+    const pipeline = new PrintPipeline({ db, env, adapters: { getAdapter: async () => makeAdapter() } });
+
+    const result = await pipeline.processIncomingJob(printer.hostname, RAW_DATA, () => 1735600000000);
+
+    expect(result.printed).toBe(1);
+    expect(result.queued).toBe(1);
+    const logs = db.select().from(printLog).all();
+    expect(logs).toHaveLength(2);
+    const failed = logs.find((l) => l.labelType === 'summary');
+    expect(failed!.status).toBe('failed');
+    expect(failed!.printerId).toBe(printer.id);
+    expect(failed!.errorMessage).toBe('Layout hat keinen zugeordneten Drucker');
+    expect(failed!.personName).toBe('Max Muster');
+  });
+
+  it('logs and queues the job when rendering or the adapter throws', async () => {
+    const printer = makePrinter('B1');
+    const media = makeMedia();
+    db.insert(labelLayouts).values({ name: 'Eltern', ctTypeKey: 'parent', printerId: printer.id, mediaId: media.id, elementsJson: STATIC_ELEMENTS }).run();
+    const pipeline = new PrintPipeline({
+      db,
+      env,
+      adapters: {
+        getAdapter: async () => {
+          throw new Error('boom');
+        },
+      },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    const result = await pipeline.processIncomingJob(printer.hostname, RAW_DATA, () => 1735600000000);
+
+    expect(result.queued).toBe(1);
+    const logs = db.select().from(printLog).all();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.status).toBe('failed');
+    expect(logs[0]!.errorMessage).toContain('boom');
+    expect(logs[0]!.personName).toBe('Max Muster');
+    const queue = db.select().from(printQueue).all();
+    expect(queue).toHaveLength(1);
+    expect(queue[0]!.reason).toContain('boom');
+  });
+
   it('also prints also[]-linked layouts on a different target printer', async () => {
     const printerA = makePrinter('B1');
     const printerB = makePrinter('B2');

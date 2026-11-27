@@ -84,7 +84,16 @@ export class PrintPipeline {
 
     const parsed = parseCheckinData(rawData);
     const unixTimestampSeconds = Math.floor(now() / 1000);
-    const layouts = resolveLayoutsForJob(this.deps.db, hostname, parsed.type ?? '');
+    const ctTypeKey = parsed.type ?? '';
+    const layouts = resolveLayoutsForJob(this.deps.db, hostname, ctTypeKey);
+    // print_log ist Basis der Anwesenheitsliste (Checkout/Evakuierung): auch ein
+    // Check-in, für den nichts gedruckt werden kann, braucht eine Zeile.
+    if (layouts.length === 0) {
+      this.logAndReturn(ctTypeKey, parsed, unixTimestampSeconds, origin.leg.id, {
+        success: false,
+        errorMessage: `Kein Layout für den Check-in-Typ "${ctTypeKey}" konfiguriert`,
+      });
+    }
 
     // also[]-Layouts (siehe routing.ts) können auf einen ANDEREN physischen
     // Drucker zeigen als das Primär-Layout, und ein Poll kann mehrere Jobs auf
@@ -95,10 +104,8 @@ export class PrintPipeline {
     let queued = 0;
     await Promise.all(
       layouts.map(async (layout) => {
-        const outcome =
-          layout.printerId !== null
-            ? await this.runExclusivePerPrinter(layout.printerId, () => this.attemptPrintLayout(layout, parsed, unixTimestampSeconds))
-            : await this.attemptPrintLayout(layout, parsed, unixTimestampSeconds);
+        const attempt = () => this.attemptPrintLayout(layout, parsed, unixTimestampSeconds, origin.leg.id);
+        const outcome = layout.printerId !== null ? await this.runExclusivePerPrinter(layout.printerId, attempt) : await attempt();
         if (outcome.success) {
           printed++;
         } else {
@@ -127,18 +134,44 @@ export class PrintPipeline {
 
     const payload = entry.jobPayloadJson as { rawData: string; unixTimestampSeconds: number };
     const parsed = parseCheckinData(payload.rawData);
-    return this.attemptPrintLayout(layoutRow, parsed, payload.unixTimestampSeconds);
+    return this.attemptPrintLayout(layoutRow, parsed, payload.unixTimestampSeconds, entry.printerId);
   }
 
-  private async attemptPrintLayout(layout: LabelLayoutRow, parsed: ParsedCheckinData, unixTimestampSeconds: number): Promise<LayoutPrintOutcome> {
-    const targetPrinter = layout.printerId ? this.getPrinterRow(layout.printerId) : null;
-    if (!targetPrinter) {
-      return this.logAndReturn(layout, parsed, unixTimestampSeconds, null, { success: false, errorMessage: 'Layout hat keinen zugeordneten Drucker' });
+  /**
+   * Ein Druckversuch inklusive print_log-Zeile. Wirft nicht, wenn Adapter oder
+   * Rendering werfen: der Fehler wird zum Ergebnis, damit der Check-in
+   * protokolliert wird und in der Queue landet. `fallbackPrinterId` trägt die
+   * Zeile, wenn das Layout selbst keinen Drucker hat.
+   */
+  private async attemptPrintLayout(
+    layout: LabelLayoutRow,
+    parsed: ParsedCheckinData,
+    unixTimestampSeconds: number,
+    fallbackPrinterId: number,
+  ): Promise<LayoutPrintOutcome> {
+    const targetPrinter = layout.printerId ? this.getPrinterRow(layout.printerId) : undefined;
+    let outcome: LayoutPrintOutcome;
+    try {
+      outcome = targetPrinter
+        ? await this.printOnPrinter(layout, targetPrinter, parsed, unixTimestampSeconds)
+        : { success: false, errorMessage: 'Layout hat keinen zugeordneten Drucker' };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      this.logger.error(`[print] Fehler bei Layout "${layout.name}": ${errorMessage}`);
+      outcome = { success: false, errorMessage };
     }
+    return this.logAndReturn(layout.ctTypeKey, parsed, unixTimestampSeconds, targetPrinter?.id ?? fallbackPrinterId, outcome);
+  }
 
+  private async printOnPrinter(
+    layout: LabelLayoutRow,
+    targetPrinter: typeof printers.$inferSelect,
+    parsed: ParsedCheckinData,
+    unixTimestampSeconds: number,
+  ): Promise<LayoutPrintOutcome> {
     const mediaRow = layout.mediaId ? this.deps.db.select().from(mediaTypes).where(eq(mediaTypes.id, layout.mediaId)).get() : undefined;
     if (!mediaRow) {
-      return this.logAndReturn(layout, parsed, unixTimestampSeconds, targetPrinter.id, { success: false, errorMessage: 'Layout hat keinen Medientyp' });
+      return { success: false, errorMessage: 'Layout hat keinen Medientyp' };
     }
 
     const attemptStartedAt = Date.now();
@@ -152,7 +185,7 @@ export class PrintPipeline {
     );
     if (status.status !== PrinterStatus.ONLINE) {
       this.logger.info(`[print] Ende Layout "${layout.name}" -> "${targetPrinter.name}" nach ${Date.now() - attemptStartedAt}ms (nicht ONLINE, wird ggf. in die Queue gelegt)`);
-      return this.logAndReturn(layout, parsed, unixTimestampSeconds, targetPrinter.id, { success: false, errorMessage: status.humanMessage });
+      return { success: false, errorMessage: status.humanMessage };
     }
 
     const media = toMediaDefinition(mediaRow);
@@ -169,39 +202,33 @@ export class PrintPipeline {
     this.logger.info(`[print] printLabel() für "${targetPrinter.name}" (id=${targetPrinter.id}) dauerte ${Date.now() - printStartedAt}ms -> ${printResult.success ? 'ok' : printResult.errorMessage}`);
     this.logger.info(`[print] Ende Layout "${layout.name}" -> "${targetPrinter.name}" nach insgesamt ${Date.now() - attemptStartedAt}ms`);
     if (!printResult.success) {
-      return this.logAndReturn(layout, parsed, unixTimestampSeconds, targetPrinter.id, {
-        success: false,
-        errorMessage: printResult.errorMessage ?? 'Druckfehler',
-        printError: true,
-      });
+      return { success: false, errorMessage: printResult.errorMessage ?? 'Druckfehler', printError: true };
     }
 
-    return this.logAndReturn(layout, parsed, unixTimestampSeconds, targetPrinter.id, { success: true });
+    return { success: true };
   }
 
   private logAndReturn(
-    layout: LabelLayoutRow,
+    labelType: string,
     parsed: ParsedCheckinData,
     unixTimestampSeconds: number,
-    targetPrinterId: number | null,
+    printerId: number,
     outcome: LayoutPrintOutcome,
   ): LayoutPrintOutcome {
-    if (targetPrinterId !== null) {
-      const qrHash = parsed.id && parsed.code ? computeQrHash(parsed.id, parsed.code, unixTimestampSeconds) : null;
-      this.deps.db
-        .insert(printLog)
-        .values({
-          printerId: targetPrinterId,
-          labelType: layout.ctTypeKey,
-          personName: parsed.name,
-          code: parsed.code,
-          groupName: parsed.group,
-          qrHash,
-          status: outcome.success ? 'success' : 'failed',
-          errorMessage: outcome.success ? null : outcome.errorMessage,
-        })
-        .run();
-    }
+    const qrHash = parsed.id && parsed.code ? computeQrHash(parsed.id, parsed.code, unixTimestampSeconds) : null;
+    this.deps.db
+      .insert(printLog)
+      .values({
+        printerId,
+        labelType,
+        personName: parsed.name,
+        code: parsed.code,
+        groupName: parsed.group,
+        qrHash,
+        status: outcome.success ? 'success' : 'failed',
+        errorMessage: outcome.success ? null : outcome.errorMessage,
+      })
+      .run();
     return outcome;
   }
 
