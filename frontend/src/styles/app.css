@@ -57,6 +57,7 @@
   border-color: var(--accent-hover);
 }
 
+.btn:disabled,
 .btn-primary:disabled {
   opacity: 0.5;
   cursor: default;

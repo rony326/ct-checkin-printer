@@ -142,6 +142,25 @@ export interface DocumentPrinter {
 export type SummaryColumn = 'name' | 'code' | 'checkinTime';
 export type SummaryTrigger = 'manual' | 'window_close';
 
+/** Gestaltung der A4-Anwesenheitsliste, gespiegelt von backend/src/rendering/summaryDesign.ts. */
+export interface SummaryDesign {
+  logoId: number | null;
+  fontSize: number;
+  orientation: 'portrait' | 'landscape';
+  checkColumns: string[];
+  guestColumn: { enabled: boolean; header: string; keyword: string };
+  footer: string;
+}
+
+export const DEFAULT_SUMMARY_DESIGN: SummaryDesign = {
+  logoId: null,
+  fontSize: 11,
+  orientation: 'landscape',
+  checkColumns: ['Abgeholt', 'Da'],
+  guestColumn: { enabled: true, header: 'Name Gast', keyword: 'Gast' },
+  footer: '',
+};
+
 /** Backend-Zeile von summary_layouts ohne triggerSecretEnc (das Secret verlässt den Server nie in der Liste). */
 export interface SummaryLayout {
   id: number;
@@ -152,6 +171,8 @@ export interface SummaryLayout {
   columnsJson: SummaryColumn[];
   titleTemplate: string;
   trigger: SummaryTrigger;
+  /** null oder fehlende Felder = Standards (DEFAULT_SUMMARY_DESIGN). */
+  designJson: (Partial<Omit<SummaryDesign, 'guestColumn'>> & { guestColumn?: Partial<SummaryDesign['guestColumn']> }) | null;
   verifyAgainstCt: boolean;
   triggerToken: string | null;
   triggerEnabled: boolean;

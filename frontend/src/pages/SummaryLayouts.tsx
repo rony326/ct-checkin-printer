@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api/client.js';
-import type { DocumentPrinter, PrinterGroup, SummaryColumn, SummaryLayout, SummaryResult, SummaryTrigger } from '../types.js';
+import { useEffect, useRef, useState } from 'react';
+import { api, postForBlob } from '../api/client.js';
+import { DEFAULT_SUMMARY_DESIGN } from '../types.js';
+import type { DocumentPrinter, PrinterGroup, SummaryColumn, SummaryDesign, SummaryLayout, SummaryResult, SummaryTrigger } from '../types.js';
+import { SummaryDesignFields } from './SummaryDesignFields.js';
 
 const COLUMN_LABELS: Record<SummaryColumn, string> = { name: 'Name', code: 'Code', checkinTime: 'Zeit' };
 const TRIGGER_LABELS: Record<SummaryTrigger, string> = {
@@ -9,6 +11,7 @@ const TRIGGER_LABELS: Record<SummaryTrigger, string> = {
 };
 const DEFAULT_TITLE = 'Sammelausdruck {{checkin.group}}';
 const TRIGGER_BASE_URL = 'http://localhost:3000/api/summary-trigger/';
+const ALL_COLUMNS = Object.keys(COLUMN_LABELS) as SummaryColumn[];
 
 type TargetKind = 'document' | 'label';
 interface LegOption {
@@ -18,6 +21,20 @@ interface LegOption {
 
 function errMsg(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
+}
+
+/** Gespeicherte (ggf. unvollständige) Einstellungen für das Formular mit den Standards auffüllen. */
+function withDesignDefaults(stored: SummaryLayout['designJson']): SummaryDesign {
+  return {
+    ...DEFAULT_SUMMARY_DESIGN,
+    ...stored,
+    guestColumn: { ...DEFAULT_SUMMARY_DESIGN.guestColumn, ...stored?.guestColumn },
+  };
+}
+
+/** Leer gelassene Abhak-Spalten gar nicht erst senden, die API lehnt sie ab. */
+function withoutEmptyCheckColumns(design: SummaryDesign): SummaryDesign {
+  return { ...design, checkColumns: design.checkColumns.filter((heading) => heading.trim() !== '') };
 }
 
 function TriggerSection({ layout, onChanged }: { layout: SummaryLayout; onChanged: () => Promise<void> }) {
@@ -122,6 +139,9 @@ export function SummaryLayouts() {
   const [columns, setColumns] = useState<SummaryColumn[]>(['name', 'code', 'checkinTime']);
   const [titleTemplate, setTitleTemplate] = useState(DEFAULT_TITLE);
   const [trigger, setTrigger] = useState<SummaryTrigger>('manual');
+  const [design, setDesign] = useState<SummaryDesign>(DEFAULT_SUMMARY_DESIGN);
+  const [previewing, setPreviewing] = useState(false);
+  const previewUrl = useRef<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [printing, setPrinting] = useState<number | null>(null);
@@ -157,6 +177,7 @@ export function SummaryLayouts() {
     setColumns(['name', 'code', 'checkinTime']);
     setTitleTemplate(DEFAULT_TITLE);
     setTrigger('manual');
+    setDesign(DEFAULT_SUMMARY_DESIGN);
     setFormError(null);
   }
 
@@ -173,14 +194,53 @@ export function SummaryLayouts() {
     setTargetKind(layout.documentPrinterId ? 'document' : 'label');
     setDocumentPrinterId(layout.documentPrinterId);
     setLegId(layout.printerId);
-    setColumns(layout.columnsJson);
+    setColumns([...new Set(layout.columnsJson)]);
     setTitleTemplate(layout.titleTemplate);
     setTrigger(layout.trigger);
+    setDesign(withDesignDefaults(layout.designJson));
     setFormError(null);
   }
 
   function toggleColumn(col: SummaryColumn) {
     setColumns((prev) => (prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]));
+  }
+
+  function moveColumn(col: SummaryColumn, offset: -1 | 1) {
+    setColumns((prev) => {
+      const from = prev.indexOf(col);
+      const to = from + offset;
+      if (from < 0 || to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      [next[from], next[to]] = [next[to]!, next[from]!];
+      return next;
+    });
+  }
+
+  // Zeigt den ungespeicherten Formularstand als PDF mit Beispieldaten.
+  async function handlePreview() {
+    setFormError(null);
+    // Das Fenster muss synchron im Klick geöffnet werden, sonst greift der Pop-up-Blocker.
+    const previewWindow = window.open('', '_blank');
+    if (!previewWindow) {
+      setFormError('Vorschau blockiert – bitte Pop-ups erlauben.');
+      return;
+    }
+    setPreviewing(true);
+    try {
+      const blob = await postForBlob('/api/summary-layouts/preview', {
+        titleTemplate,
+        columnsJson: columns,
+        designJson: withoutEmptyCheckColumns(design),
+      });
+      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+      previewUrl.current = URL.createObjectURL(blob);
+      previewWindow.location.href = previewUrl.current;
+    } catch (err) {
+      previewWindow.close();
+      setFormError(errMsg(err, 'Vorschau fehlgeschlagen'));
+    } finally {
+      setPreviewing(false);
+    }
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -203,6 +263,8 @@ export function SummaryLayouts() {
       columnsJson: columns,
       titleTemplate,
       trigger,
+      // Beim Etikettendrucker weglassen: gespeicherte Einstellungen bleiben dann unverändert.
+      ...(targetKind === 'document' ? { designJson: withoutEmptyCheckColumns(design) } : {}),
     };
     try {
       if (editingId === null) await api.post('/api/summary-layouts', payload);
@@ -253,6 +315,8 @@ export function SummaryLayouts() {
   }
 
   const editing = layouts?.find((l) => l.id === editingId) ?? null;
+  // Beim A4-Drucker zählt die Reihenfolge: gewählte Spalten zuerst, in Druckreihenfolge.
+  const orderedColumns = targetKind === 'document' ? [...columns, ...ALL_COLUMNS.filter((c) => !columns.includes(c))] : ALL_COLUMNS;
 
   return (
     <div className="page">
@@ -305,11 +369,23 @@ export function SummaryLayouts() {
 
             <div className="field">
               <label>Spalten</label>
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                {(Object.keys(COLUMN_LABELS) as SummaryColumn[]).map((col) => (
-                  <label key={col} style={{ fontSize: '0.85rem' }}>
-                    <input type="checkbox" checked={columns.includes(col)} onChange={() => toggleColumn(col)} /> {COLUMN_LABELS[col]}
-                  </label>
+              <div style={{ display: 'flex', flexDirection: targetKind === 'document' ? 'column' : 'row', gap: targetKind === 'document' ? '0.4rem' : '1rem' }}>
+                {orderedColumns.map((col) => (
+                  <div key={col} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <label style={{ fontSize: '0.85rem', minWidth: '5rem' }}>
+                      <input type="checkbox" checked={columns.includes(col)} onChange={() => toggleColumn(col)} /> {COLUMN_LABELS[col]}
+                    </label>
+                    {targetKind === 'document' && columns.includes(col) && (
+                      <>
+                        <button type="button" className="btn" aria-label={`${COLUMN_LABELS[col]} nach oben`} disabled={columns.indexOf(col) === 0} onClick={() => moveColumn(col, -1)}>
+                          ↑
+                        </button>
+                        <button type="button" className="btn" aria-label={`${COLUMN_LABELS[col]} nach unten`} disabled={columns.indexOf(col) === columns.length - 1} onClick={() => moveColumn(col, 1)}>
+                          ↓
+                        </button>
+                      </>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
@@ -333,11 +409,18 @@ export function SummaryLayouts() {
               </select>
             </div>
 
+            {targetKind === 'document' && <SummaryDesignFields value={design} onChange={setDesign} />}
+
             {formError && <p className="error-text">{formError}</p>}
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
               <button type="submit" className="btn btn-primary">
                 {editingId === null ? 'Anlegen' : 'Speichern'}
               </button>
+              {targetKind === 'document' && (
+                <button type="button" className="btn" disabled={previewing} onClick={handlePreview}>
+                  Vorschau
+                </button>
+              )}
               {editingId !== null && (
                 <button type="button" className="btn" onClick={resetForm}>
                   Abbrechen

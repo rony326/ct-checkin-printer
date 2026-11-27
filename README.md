@@ -56,8 +56,9 @@ siehe [Bekannte Lücken](#bekannte-lücken).
   Neustart und werden automatisch nachgedruckt, sobald der Zieldrucker wieder
   bereit ist.
 - **Gruppen-Sammelausdruck**: am Ende eines Check-in-Zeitfensters (oder per
-  Knopfdruck im GUI) ein Ausdruck pro Gruppe mit allen Namen/Codes — wahlweise
-  als Etikettenstreifen oder als PDF auf einem IPP-Netzwerkdrucker.
+  Knopfdruck im GUI) eine Anwesenheitsliste pro Gruppe mit allen empfangenen
+  Check-ins — wahlweise als Etikettenstreifen oder als gestaltbares A4-PDF auf
+  einem IPP-Netzwerkdrucker.
 - **Hardware-Taster am Raspberry Pi**: ein Tastendruck druckt die
   Anwesenheitsliste für heute, eine LED zeigt den Status (Pi-Dienst in
   [`pi/`](pi/README.md)).
@@ -182,14 +183,60 @@ Zeitzone des Containers (`TZ`, siehe oben).
 
 ## Gruppen-Sammelausdruck
 
-Ein Sammelausdruck druckt pro ChurchTools-Gruppe eine Liste aller erfolgreich
-gedruckten Check-ins (Name/Code/Uhrzeit) — es wird also **ein Dokument pro
-Gruppe** gedruckt. Datenquelle ist ausschliesslich `print_log`: nur Check-ins,
-die tatsächlich erfolgreich gedruckt wurden, erscheinen auf der Liste.
-Zielausgabe wahlweise:
+Ein Sammelausdruck druckt pro ChurchTools-Gruppe eine Anwesenheitsliste (für
+Checkout und Evakuierung) — also **ein Dokument pro Gruppe**. Zielausgabe
+wahlweise:
 
 - ein vorhandener Etikettendrucker im Endlosband-Modus, oder
 - ein A4/Büro-Netzwerkdrucker per IPP (`document_printers`, PDF-Tabelle).
+
+### Wer auf der Liste steht
+
+- Datenquelle ist ausschliesslich `print_log`: alle Check-ins, die dieser Dienst
+  im Zeitraum für einen hier angelegten Drucker empfangen hat — **auch solche,
+  deren Etikettendruck fehlgeschlagen ist** oder für deren Typ kein Layout
+  konfiguriert ist. Check-ins, die den Dienst nie erreicht haben, fehlen.
+- Jede Person steht pro Gruppe einmal auf der Liste. Zwei Einträge (z.B.
+  Eltern- und Kinder-Etikett oder ein wiederholter Druck) werden nur dann
+  zusammengefasst, wenn **Gruppe, Name und Code** übereinstimmen; es gilt die
+  früheste Uhrzeit. Dieselbe Person mit einem anderen Code erscheint also
+  zweimal. Einträge ohne Name und ohne Code werden nie zusammengefasst.
+- Check-ins ohne Gruppenangabe stehen auf der Liste „Ohne Gruppe“.
+- **Gäste** sind Personen, deren Name mit dem Erkennungswort (Standard `Gast`,
+  Gross-/Kleinschreibung egal) beginnt, gefolgt von einem Leerzeichen oder einer
+  Ziffer (`Gast 1`, `Gast2`, nicht aber `Gastmann`). Gäste stehen zuoberst,
+  danach alle anderen, jeweils nach Name sortiert.
+
+### Einstellungen
+
+Pro Sammelausdruck wählbar: Titel, die Spalten Name/Code/Zeit (mindestens eine;
+für eine Evakuierungsliste den Namen angewählt lassen) und der Auslöser.
+
+Beim Ziel „A4-Drucker“ kommt die Gestaltung der Liste dazu:
+
+| Einstellung | Möglich | Standard |
+|---|---|---|
+| Reihenfolge der Spalten | Knöpfe „↑“/„↓“ | Name, Code, Zeit |
+| Logo | ein hochgeladenes PNG/JPEG (Upload im Etiketten-Editor) oder keines; ein unlesbares oder gelöschtes Logo wird weggelassen | keines |
+| Schriftgrösse | 8–18 pt; wird für die Tabelle bei Bedarf verkleinert, damit Namen nicht im Wort umbrechen | 11 pt |
+| Ausrichtung | Querformat / Hochformat | Querformat |
+| Abhak-Spalten | 0–4, Überschrift je bis 20 Zeichen; Spalten ohne Überschrift werden verworfen | „Abgeholt“, „Da“ |
+| Gast-Spalte | an/aus, Überschrift bis 30 Zeichen; Schreiblinie bei Gästen für den echten Namen | an, „Name Gast“ |
+| Erkennungswort | 1–30 Zeichen; wirkt auch bei ausgeschalteter Gast-Spalte auf die Sortierung | `Gast` |
+| Fusszeile | bis 200 Zeichen | leer |
+
+Die Liste enthält die Abhak-Spalten, dann Name/Code/Zeit, dann die Gast-Spalte.
+Jede Seite wiederholt den Kopf (Logo, Titel, Anzahl Personen, Druckzeitpunkt)
+und den Tabellenkopf und trägt die Seitenzahl.
+
+Der Etikettenstreifen hat ein festes Aussehen; die Gestaltungs-Einstellungen
+gelten dort nicht. Einzig ein früher beim selben Sammelausdruck gespeichertes
+Erkennungswort bestimmt weiterhin, wer als Gast zuoberst steht (sonst `Gast`).
+
+**Vorschau**: Der Knopf „Vorschau“ im Formular (nur A4) öffnet die Liste mit dem
+aktuellen, auch noch ungespeicherten Formularstand und Beispieldaten (2 Gäste,
+40 weitere Personen) als PDF in einem neuen Tab. Es wird nichts gedruckt und
+nichts gespeichert. Der Browser muss dafür Pop-ups der Seite zulassen.
 
 Bedienung:
 
@@ -219,8 +266,8 @@ Bedienung:
   Check-in-Zeitfensters von selbst.
 
 > **Bekannte Lücke:** der optionale `verify_against_ct`-Abgleich gegen
-> ChurchTools' eigene Checkin-Liste einer Gruppe (Absicherung gegen
-> fehlgeschlagene/wiederholte Drucke) ist im Schema vorgesehen, aber noch
+> ChurchTools' eigene Checkin-Liste einer Gruppe (Absicherung gegen Check-ins,
+> die den Dienst nie erreicht haben) ist im Schema vorgesehen, aber noch
 > **nicht implementiert** — dafür fehlt noch die Recherche zu einem
 > passenden ChurchTools-oldApi-Endpunkt.
 
