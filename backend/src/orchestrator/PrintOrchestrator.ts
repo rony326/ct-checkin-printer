@@ -72,7 +72,8 @@ export class PrintOrchestrator {
     this.pipeline = pipeline;
 
     this.summaryReportService =
-      this.summaryReportServiceOverride ?? new SummaryReportService({ db: this.db, labelAdapters: adapters, documentAdapters: new DocumentAdapterRegistry() });
+      this.summaryReportServiceOverride ??
+      new SummaryReportService({ db: this.db, dbPath: this.env.DB_PATH, labelAdapters: adapters, documentAdapters: new DocumentAdapterRegistry() });
 
     const queueMonitor = new QueueMonitor({
       db: this.db,

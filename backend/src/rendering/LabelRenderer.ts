@@ -37,12 +37,14 @@ export const FALLBACK_BOLD_FAMILY = 'CtCheckinFallback-Bold';
  * Font wie v1 → visuell konsistentes Druckbild zu bestehenden Etiketten.
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const FALLBACK_REGULAR_FONT_PATH = path.join(__dirname, '../../assets/fonts/DejaVuSans.ttf');
+export const FALLBACK_BOLD_FONT_PATH = path.join(__dirname, '../../assets/fonts/DejaVuSans-Bold.ttf');
 let fallbackFontsRegistered = false;
 export function ensureFallbackFontsRegistered(): void {
   if (fallbackFontsRegistered) return;
   fallbackFontsRegistered = true;
-  GlobalFonts.registerFromPath(path.join(__dirname, '../../assets/fonts/DejaVuSans.ttf'), FALLBACK_REGULAR_FAMILY);
-  GlobalFonts.registerFromPath(path.join(__dirname, '../../assets/fonts/DejaVuSans-Bold.ttf'), FALLBACK_BOLD_FAMILY);
+  GlobalFonts.registerFromPath(FALLBACK_REGULAR_FONT_PATH, FALLBACK_REGULAR_FAMILY);
+  GlobalFonts.registerFromPath(FALLBACK_BOLD_FONT_PATH, FALLBACK_BOLD_FAMILY);
 }
 
 export interface RenderLabelOptions {

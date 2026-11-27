@@ -4,7 +4,9 @@ import type { LabelPrinterAdapter, DocumentPrinterAdapter, PrintResult } from '.
 import type { Db } from '../db/client.js';
 import { documentPrinters, mediaTypes, printLog, printers, summaryLayouts } from '../db/schema.js';
 import { VENDOR_DPI } from '../rendering/dimensions.js';
+import { resolveSummaryDesign, type SummaryDesign } from '../rendering/summaryDesign.js';
 import { renderSummaryLabelStrip, renderSummaryPdf, type SummaryColumn, type SummaryColumnKey, type SummaryRow } from '../rendering/SummaryRenderer.js';
+import { loadLogoBuffers } from './renderAssets.js';
 import { groupSummaryRows } from './summaryData.js';
 
 export interface SummaryLabelAdapters {
@@ -17,6 +19,8 @@ export interface SummaryDocumentAdapters {
 
 export interface SummaryReportDeps {
   db: Db;
+  /** Pfad der SQLite-Datei — die hochgeladenen Logos liegen daneben. */
+  dbPath: string;
   labelAdapters: SummaryLabelAdapters;
   documentAdapters: SummaryDocumentAdapters;
 }
@@ -63,7 +67,8 @@ export class SummaryReportService {
     const layout = this.deps.db.select().from(summaryLayouts).where(eq(summaryLayouts.id, summaryLayoutId)).get();
     if (!layout) return { ok: false, message: 'Sammel-Layout nicht gefunden', groupsPrinted: 0, groupsFailed: 0, empty: false };
 
-    const grouped = this.collectGroupedRows(since, until);
+    const design = resolveSummaryDesign(layout.designJson);
+    const grouped = this.collectGroupedRows(since, until, design.guestColumn.keyword);
     const columns = this.resolveColumns(layout.columnsJson);
 
     let groupsPrinted = 0;
@@ -77,7 +82,7 @@ export class SummaryReportService {
         if (layout.printerId) {
           result = await this.printToLabelPrinter(layout.printerId, rows, columns, title);
         } else if (layout.documentPrinterId) {
-          result = await this.printToDocumentPrinter(layout.documentPrinterId, rows, columns, title);
+          result = await this.printToDocumentPrinter(layout.documentPrinterId, rows, columns, title, design);
         } else {
           result = { success: false, errorMessage: 'Kein Ausgabedrucker im Sammel-Layout konfiguriert' };
         }
@@ -96,7 +101,7 @@ export class SummaryReportService {
     return { ok: groupsFailed === 0, ...(message ? { message } : {}), groupsPrinted, groupsFailed, empty: grouped.size === 0 };
   }
 
-  private collectGroupedRows(since: Date, until: Date): Map<string, SummaryRow[]> {
+  private collectGroupedRows(since: Date, until: Date, guestKeyword: string): Map<string, SummaryRow[]> {
     const rows = this.deps.db
       .select()
       .from(printLog)
@@ -104,7 +109,7 @@ export class SummaryReportService {
       .all();
 
     return new Map(
-      [...groupSummaryRows(rows, 'Gast')].map(([groupName, entries]) => [
+      [...groupSummaryRows(rows, guestKeyword)].map(([groupName, entries]) => [
         groupName,
         entries.map(({ name, code, printedAt, isGuest }) => ({ name, code, checkinTime: formatTime(printedAt), isGuest })),
       ]),
@@ -128,11 +133,22 @@ export class SummaryReportService {
     return adapter.printLabel(bitmap, media, { copies: 1, rotate: '0' });
   }
 
-  private async printToDocumentPrinter(documentPrinterId: number, rows: SummaryRow[], columns: SummaryColumn[], title: string): Promise<PrintResult> {
+  /** Ein fehlendes oder unlesbares Logo darf den Ausdruck nie verhindern. */
+  private async loadLogo(logoId: number | null): Promise<Buffer | undefined> {
+    if (logoId === null) return undefined;
+    try {
+      return (await loadLogoBuffers(this.deps.db, this.deps.dbPath, [logoId]))[logoId];
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async printToDocumentPrinter(documentPrinterId: number, rows: SummaryRow[], columns: SummaryColumn[], title: string, design: SummaryDesign): Promise<PrintResult> {
     const docPrinter = this.deps.db.select().from(documentPrinters).where(eq(documentPrinters.id, documentPrinterId)).get();
     if (!docPrinter) return { success: false, errorMessage: `Drucker „${documentPrinterId}“ nicht gefunden` };
 
-    const pdf = await renderSummaryPdf(rows, columns, title);
+    const logo = await this.loadLogo(design.logoId);
+    const pdf = await renderSummaryPdf({ rows, columns, title, design, logo, printedAt: new Date() });
     const adapter = await this.deps.documentAdapters.getAdapter(docPrinter);
     return adapter.printDocument(pdf, { copies: 1 });
   }
