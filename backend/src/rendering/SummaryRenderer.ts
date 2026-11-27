@@ -125,7 +125,15 @@ const FOOTER_MAX_HEIGHT_SHARE = 0.15;
 const FOOTER_FONT_SIZE = 9;
 const MIN_HEADING_FONT_SIZE = 7;
 
-const REGULAR = 'regular';
+/** Grössere PNGs bräuchten beim Dekodieren Hunderte MB Arbeitsspeicher (Raspberry Pi). */
+const MAX_LOGO_PIXELS = 16_000_000;
+
+/**
+ * Der Dateipfad dient direkt als Schriftname der normalen Schrift: Unter diesem Namen merkt sich pdfkit die beim
+ * Anlegen geladene Schrift. Ein per `registerFont` vergebener Zweitname liesse die Datei bei jedem Schriftwechsel
+ * neu einlesen (rund 25 ms je Zeile, in denen auch der Etikettendruck stillsteht).
+ */
+const REGULAR = FALLBACK_REGULAR_FONT_PATH;
 const BOLD = 'bold';
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 const JPEG_END = Buffer.from([0xff, 0xd9]);
@@ -302,7 +310,9 @@ function isCompleteJpeg(data: Buffer): boolean {
 }
 
 /** Vollständig dekodiert (wirft bei defekten Daten) und als sauberes, auf Druckgrösse verkleinertes PNG neu geschrieben. */
-function normalizePng(data: Buffer): Buffer {
+function normalizePng(data: Buffer): Buffer | null {
+  // Breite und Höhe stehen im Bildkopf (IHDR), also vor dem Dekodieren prüfbar.
+  if (data.length < 24 || data.readUInt32BE(16) * data.readUInt32BE(20) > MAX_LOGO_PIXELS) return null;
   const decoded = PNG.sync.read(data);
   const source = createCanvas(decoded.width, decoded.height);
   const pixels = source.getContext('2d').createImageData(decoded.width, decoded.height);
@@ -354,13 +364,13 @@ export function renderSummaryPdf(input: SummaryPdfInput): Promise<Buffer> {
       // Ohne unteren Rand legt pdfkit nicht selbst Seiten an (sonst Leerseiten durch Text nahe am Seitenende).
       margins: { top: PAGE_MARGIN, left: PAGE_MARGIN, right: PAGE_MARGIN, bottom: 0 },
       bufferPages: true,
-      font: FALLBACK_REGULAR_FONT_PATH,
+      // Ohne diese Angabe lädt pdfkit beim Anlegen Helvetica.
+      font: REGULAR,
     });
     const chunks: Buffer[] = [];
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
-    doc.registerFont(REGULAR, FALLBACK_REGULAR_FONT_PATH);
     doc.registerFont(BOLD, FALLBACK_BOLD_FONT_PATH);
 
     const { width: pageWidth, height: pageHeight } = doc.page;

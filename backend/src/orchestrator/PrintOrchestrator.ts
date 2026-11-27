@@ -80,6 +80,7 @@ export class PrintOrchestrator {
       pipeline,
       limits: { maxRetries: config.queueMaxRetries, maxAgeMs: config.queueMaxAgeMs },
       intervalMs: config.queueRetryMs,
+      logger: this.logger,
     });
     queueMonitor.start();
     this.queueMonitor = queueMonitor;

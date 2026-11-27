@@ -55,6 +55,17 @@ describe('groupSummaryRows — Zusammenfassen', () => {
     expect([...grouped.keys()]).toEqual(['Ohne Gruppe']);
   });
 
+  it.each(['', '   '])('collects rows with the empty group name %j under "Ohne Gruppe", together with rows without a group', (groupName) => {
+    const grouped = groupSummaryRows([logRow({ groupName }), logRow({ groupName: null, personName: 'Erika Muster' })], 'Gast');
+
+    expect([...grouped.keys()]).toEqual(['Ohne Gruppe']);
+    expect(grouped.get('Ohne Gruppe')).toHaveLength(2);
+  });
+
+  it('leaves a non-empty group name unchanged', () => {
+    expect([...groupSummaryRows([logRow({ groupName: ' Kids ' })], 'Gast').keys()]).toEqual([' Kids ']);
+  });
+
   it('returns no groups for no rows', () => {
     expect(groupSummaryRows([], 'Gast').size).toBe(0);
   });

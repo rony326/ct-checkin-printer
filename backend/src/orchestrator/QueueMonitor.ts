@@ -11,6 +11,7 @@ export interface QueueMonitorDeps {
   limits: RetryLimits;
   intervalMs: number;
   now?: () => number;
+  logger?: Pick<Console, 'error'>;
 }
 
 /**
@@ -22,8 +23,11 @@ export interface QueueMonitorDeps {
  */
 export class QueueMonitor {
   private timer: NodeJS.Timeout | null = null;
+  private readonly logger: Pick<Console, 'error'>;
 
-  constructor(private readonly deps: QueueMonitorDeps) {}
+  constructor(private readonly deps: QueueMonitorDeps) {
+    this.logger = deps.logger ?? console;
+  }
 
   start(): void {
     this.scheduleNext();
@@ -39,7 +43,12 @@ export class QueueMonitor {
   }
 
   private async runAndReschedule(): Promise<void> {
-    await this.tick();
+    // Ein unbehandelter Fehler würde den ganzen Dienst beenden.
+    try {
+      await this.tick();
+    } catch (err) {
+      this.logger.error('[queue] Durchlauf fehlgeschlagen', err);
+    }
     this.scheduleNext();
   }
 
@@ -48,11 +57,15 @@ export class QueueMonitor {
     const now = this.deps.now ?? Date.now;
 
     for (const entry of pending) {
-      const result = await this.deps.pipeline.retryQueuedJob(entry);
-      if (result.success) {
-        recordSuccess(this.deps.db, entry.id);
-      } else {
-        recordFailedAttempt(this.deps.db, entry.id, this.deps.limits, now());
+      try {
+        const result = await this.deps.pipeline.retryQueuedJob(entry);
+        if (result.success) {
+          recordSuccess(this.deps.db, entry.id);
+        } else {
+          recordFailedAttempt(this.deps.db, entry.id, this.deps.limits, now());
+        }
+      } catch (err) {
+        this.logger.error(`[queue] Fehler bei Eintrag ${entry.id}`, err);
       }
     }
   }

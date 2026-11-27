@@ -392,6 +392,51 @@ describe('renderSummaryPdf', () => {
     expect(drawn.find((d) => d.text === 'Maximilian Mustermann')!.size).toBe(14);
   });
 
+  // Der Aufbau läuft synchron und blockiert so lange auch den Etikettendruck.
+  it('renders 200 rows quickly and without any standard font', { timeout: 30_000 }, async () => {
+    const startedAt = performance.now();
+    const pdf = await renderSummaryPdf(pdfInput({ rows: manyRows(200) }));
+    const durationMs = performance.now() - startedAt;
+
+    expect(durationMs).toBeLessThan(2000);
+    expect(pdf.toString('latin1')).not.toContain('Helvetica');
+  });
+
+  /** Kleine Datei, deren Bildkopf (IHDR, Bytes 16-23) beliebige Masse behauptet. */
+  function pngDeclaring(width: number, height: number): Buffer {
+    const buffer = wideLogo();
+    buffer.writeUInt32BE(width, 16);
+    buffer.writeUInt32BE(height, 20);
+    return buffer;
+  }
+
+  // Der Dekoder ist ersetzt, damit auch ein fehlschlagender Test nie so viel Speicher belegt.
+  it.each([
+    [20_000, 20_000],
+    [4001, 4000],
+    [0xffffffff, 1],
+  ])('prints without logo, and without decoding it, for a PNG declaring %i x %i pixels', async (width, height) => {
+    const read = vi.spyOn(PNG.sync, 'read').mockImplementation(() => {
+      throw new Error('nicht dekodieren');
+    });
+
+    const pdf = await renderSummaryPdf(pdfInput({ logo: pngDeclaring(width, height) }));
+
+    expect(read).not.toHaveBeenCalled();
+    expect(countPages(pdf)).toBe(1);
+    expect(pdf.toString('latin1')).not.toContain('/Subtype /Image');
+  });
+
+  it('still decodes a PNG of exactly 16 million pixels', async () => {
+    const read = vi.spyOn(PNG.sync, 'read').mockImplementation(() => {
+      throw new Error('nicht dekodieren');
+    });
+
+    await renderSummaryPdf(pdfInput({ logo: pngDeclaring(4000, 4000) }));
+
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
   it('says so when there are no check-ins', async () => {
     const drawn = recordTexts();
     const pdf = await renderSummaryPdf(pdfInput({ rows: [] }));

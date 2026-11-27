@@ -196,6 +196,9 @@ wahlweise:
   im Zeitraum für einen hier angelegten Drucker empfangen hat — **auch solche,
   deren Etikettendruck fehlgeschlagen ist** oder für deren Typ kein Layout
   konfiguriert ist. Check-ins, die den Dienst nie erreicht haben, fehlen.
+- Jeder Nachdruckversuch aus der Warteschlange schreibt eine neue Protokollzeile
+  mit dem Zeitpunkt des Versuchs; wessen Etikett noch in der Warteschlange
+  hängt, kann deshalb auch auf der Liste des späteren Zeitraums erscheinen.
 - Jede Person steht pro Gruppe einmal auf der Liste. Zwei Einträge (z.B.
   Eltern- und Kinder-Etikett oder ein wiederholter Druck) werden nur dann
   zusammengefasst, wenn **Gruppe, Name und Code** übereinstimmen; es gilt die

@@ -37,7 +37,8 @@ export function groupSummaryRows(rows: CheckinLogRow[], guestKeyword: string): M
   const groups = new Map<string, Map<string | number, SummaryEntry>>();
 
   rows.forEach((row, index) => {
-    const groupName = row.groupName ?? UNGROUPED_LABEL;
+    // Auch eine leere Gruppenangabe (`group=` ohne Wert) zählt als keine; sonst bleibt der Name unverändert.
+    const groupName = row.groupName?.trim() ? row.groupName : UNGROUPED_LABEL;
     const name = row.personName ?? '';
     const code = row.code ?? '';
     // Der Zeilenindex (Zahl) kollidiert nie mit einem Textschlüssel.
