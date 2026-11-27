@@ -6,6 +6,7 @@ import { requireAuth } from '../auth/routes.js';
 import { decryptSecret, encryptSecret, secretsEqual } from '../crypto/secrets.js';
 import { summaryLayouts } from '../db/schema.js';
 import type { GenerateSummaryResult } from '../orchestrator/SummaryReportService.js';
+import { summaryDesignSchema } from '../rendering/summaryDesign.js';
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -19,6 +20,8 @@ const createSchema = z.object({
   titleTemplate: z.string().min(1).optional(),
   trigger: z.enum(['window_close', 'manual']).optional(),
   verifyAgainstCt: z.boolean().optional(),
+  /** Gestaltung der A4-Liste. Bei PUT: weggelassen = unverändert, null = zurück auf die Standards, Objekt = ersetzt komplett. */
+  designJson: summaryDesignSchema.nullable().optional(),
 });
 const updateSchema = createSchema.partial();
 

@@ -1,0 +1,1 @@
+ALTER TABLE `summary_layouts` ADD `design_json` text;

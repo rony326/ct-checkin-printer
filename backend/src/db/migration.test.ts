@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createDb } from './client.js';
+import { summaryLayouts } from './schema.js';
 
 let tmpDir: string;
 
@@ -22,7 +23,7 @@ describe('printer_groups Migration', () => {
     const migrationsDir = path.join(import.meta.dirname, '../../migrations');
     const journal = JSON.parse(readFileSync(path.join(migrationsDir, 'meta/_journal.json'), 'utf8'));
     const baselineEntries = journal.entries.filter(
-      (e: { tag: string }) => !e.tag.startsWith('0005_') && !e.tag.startsWith('0006_') && !e.tag.startsWith('0007_') && !e.tag.startsWith('0008_'),
+      (e: { tag: string }) => !e.tag.startsWith('0005_') && !e.tag.startsWith('0006_') && !e.tag.startsWith('0007_') && !e.tag.startsWith('0008_') && !e.tag.startsWith('0009_'),
     );
     cpSync(migrationsDir, baselineDir, { recursive: true });
     for (const entry of journal.entries) {
@@ -128,5 +129,33 @@ describe('summary_layouts Taster-Zugang Migration', () => {
     expect(() => raw.prepare(`INSERT INTO summary_layouts (name, trigger_token) VALUES ('B', 'tok')`).run()).toThrow(/UNIQUE/);
     raw.prepare(`INSERT INTO summary_layouts (name) VALUES ('C')`).run();
     raw.close();
+  });
+});
+
+describe('summary_layouts Design Migration', () => {
+  it('ergänzt design_json, bestehende Zeilen haben designJson === null', () => {
+    tmpDir = mkdtempSync(path.join(tmpdir(), 'ct-checkin-printer-migtest-'));
+    const dbPath = path.join(tmpDir, 'app.db');
+    const migrationsDir = path.join(import.meta.dirname, '../../migrations');
+
+    // Baseline: Stand vor der Design-Migration, mit einem vorhandenen Layout.
+    const baselineDir = path.join(tmpDir, 'baseline-migrations');
+    const journal = JSON.parse(readFileSync(path.join(migrationsDir, 'meta/_journal.json'), 'utf8'));
+    cpSync(migrationsDir, baselineDir, { recursive: true });
+    const entries = journal.entries.filter((e: { tag: string }) => !e.tag.startsWith('0009_'));
+    writeFileSync(path.join(baselineDir, 'meta/_journal.json'), JSON.stringify({ ...journal, entries }));
+    migrate(createDb(dbPath, { foreignKeys: false }), { migrationsFolder: baselineDir });
+
+    const raw = new Database(dbPath);
+    raw.prepare(`INSERT INTO summary_layouts (name) VALUES ('Alt-Layout')`).run();
+    raw.close();
+
+    const db = createDb(dbPath, { foreignKeys: false });
+    migrate(db, { migrationsFolder: migrationsDir });
+
+    const rows = db.select().from(summaryLayouts).all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.name).toBe('Alt-Layout');
+    expect(rows[0]!.designJson).toBeNull();
   });
 });

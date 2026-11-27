@@ -526,6 +526,42 @@ describe('Summary-Layouts API', () => {
     expect(deleteRes.json()).toEqual({ ok: true });
   });
 
+  it('speichert die Design-Einstellungen, behält sie bei PUT ohne designJson und löscht sie mit null', async () => {
+    const headers = { cookie: sessionCookie, 'content-type': 'application/json' };
+    const documentPrinterId = (
+      await app.inject({ method: 'POST', url: '/api/document-printers', headers, payload: { name: 'Design-Büro', host: '192.168.1.93' } })
+    ).json().id;
+    const designJson = {
+      logoId: null,
+      fontSize: 14,
+      orientation: 'portrait',
+      checkColumns: ['Da'],
+      guestColumn: { enabled: false, header: 'Gast von', keyword: 'Besuch' },
+      footer: 'Bitte abhaken',
+    };
+
+    const createRes = await app.inject({ method: 'POST', url: '/api/summary-layouts', headers, payload: { name: 'Design-Layout', documentPrinterId, designJson } });
+    expect(createRes.statusCode).toBe(201);
+    const url = `/api/summary-layouts/${createRes.json().id}`;
+    const read = async () => (await app.inject({ method: 'GET', url, headers: { cookie: sessionCookie } })).json();
+    expect((await read()).designJson).toEqual(designJson);
+
+    await app.inject({ method: 'PUT', url, headers, payload: { name: 'Design-Layout 2' } });
+    expect((await read()).designJson).toEqual(designJson);
+
+    const invalid = await app.inject({ method: 'PUT', url, headers, payload: { designJson: { fontSize: 30 } } });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error).toBe('Schriftgrösse darf höchstens 18 pt sein');
+    expect((await read()).designJson).toEqual(designJson);
+
+    await app.inject({ method: 'PUT', url, headers, payload: { designJson: { fontSize: 9 } } });
+    expect((await read()).designJson).toEqual({ fontSize: 9 });
+
+    const cleared = await app.inject({ method: 'PUT', url, headers, payload: { designJson: null } });
+    expect(cleared.statusCode).toBe(200);
+    expect((await read()).designJson).toBeNull();
+  });
+
   it('meldet "Sammel-Layout nicht gefunden" für eine unbekannte ID beim manuellen Trigger', async () => {
     const res = await app.inject({ method: 'POST', url: '/api/summary-layouts/999999/print', headers: { cookie: sessionCookie } });
     expect(res.statusCode).toBe(404);

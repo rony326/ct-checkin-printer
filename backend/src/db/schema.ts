@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import type { SummaryDesign } from '../rendering/summaryDesign.js';
 import type { QrContentPath, TextFieldPath } from '../template/variables.js';
 
 const timestamps = {
@@ -174,6 +175,8 @@ export const summaryLayouts = sqliteTable('summary_layouts', {
   triggerToken: text('trigger_token').unique(),
   triggerSecretEnc: text('trigger_secret_enc'),
   triggerEnabled: integer('trigger_enabled', { mode: 'boolean' }).notNull().default(false),
+  /** Gestaltung der A4-Liste; null = Standards. Immer über `resolveSummaryDesign` lesen. */
+  designJson: text('design_json', { mode: 'json' }).$type<Partial<SummaryDesign>>(),
   ...timestamps,
 });
 
