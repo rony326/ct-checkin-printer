@@ -4,6 +4,7 @@ import type { Db } from '../db/client.js';
 import { documentPrinters, mediaTypes, printerGroups, printLog, printers, summaryLayouts } from '../db/schema.js';
 import type { LabelPrinterAdapter } from '../adapters/printer/types.js';
 import type { DocumentPrinterAdapter } from '../adapters/printer/types.js';
+import * as summaryRenderer from '../rendering/SummaryRenderer.js';
 import { SummaryReportService } from './SummaryReportService.js';
 import { createTestDb } from './testDb.js';
 
@@ -36,7 +37,7 @@ function fakeDocumentAdapter() {
 }
 
 describe('SummaryReportService.generate — Endlosband-Ausgabe', () => {
-  it('groups successful check-ins by group and prints one strip per group', async () => {
+  it('groups all received check-ins by group, failed prints included, and prints one strip per group', async () => {
     const [printerGroup] = db.insert(printerGroups).values({ name: 'B1', hostname: 'B1' }).returning().all();
     const printer = db.insert(printers).values({ groupId: printerGroup!.id, name: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).returning().all()[0]!;
     const media = db.insert(mediaTypes).values({ vendor: 'brother-ql', externalId: '62', name: '62mm', widthMm: 62, heightMm: null, printableWidthMm: 60 }).returning().all()[0]!;
@@ -45,7 +46,7 @@ describe('SummaryReportService.generate — Endlosband-Ausgabe', () => {
 
     insertPrintLog({ printerId: printer.id, groupName: 'Kids', personName: 'Max Muster', code: 'ZRYK' });
     insertPrintLog({ printerId: printer.id, groupName: 'Teens', personName: 'Erika Muster', code: 'AB12' });
-    insertPrintLog({ printerId: printer.id, groupName: 'Kids', personName: 'Failed Person', code: 'XX99', status: 'failed' });
+    insertPrintLog({ printerId: printer.id, groupName: 'Minis', personName: 'Failed Person', code: 'XX99', status: 'failed' });
 
     const [layout] = db.insert(summaryLayouts).values({ name: 'Sammel', printerId: outputPrinter.id }).returning().all();
     const label = fakeLabelAdapter();
@@ -56,8 +57,8 @@ describe('SummaryReportService.generate — Endlosband-Ausgabe', () => {
     expect(result.ok).toBe(true);
     expect(result.groupsFailed).toBe(0);
     expect(result.empty).toBe(false);
-    expect(result.groupsPrinted).toBe(2); // Kids, Teens — der fehlgeschlagene Druck zählt nicht mit
-    expect(label.adapter.printLabel).toHaveBeenCalledTimes(2);
+    expect(result.groupsPrinted).toBe(3); // Kids, Teens, Minis — auch wer nur einen fehlgeschlagenen Druck hat, war da
+    expect(label.adapter.printLabel).toHaveBeenCalledTimes(3);
   });
 
   it('reports zero groups without touching any adapter when there is nothing to summarize', async () => {
@@ -108,6 +109,31 @@ describe('SummaryReportService.generate — IPP/PDF-Ausgabe', () => {
     expect(documentAdapters.adapter.printDocument).toHaveBeenCalledTimes(1);
     const [pdfArg] = (documentAdapters.adapter.printDocument as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(Buffer.isBuffer(pdfArg)).toBe(true);
+  });
+});
+
+describe('SummaryReportService.generate — Listeninhalt', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('hands the renderer each person once with the earliest time, guests first', async () => {
+    const [printerGroup] = db.insert(printerGroups).values({ name: 'B1', hostname: 'B1' }).returning().all();
+    const printer = db.insert(printers).values({ groupId: printerGroup!.id, name: 'B1', vendor: 'brother-ql', host: '10.0.0.1' }).returning().all()[0]!;
+    const docPrinter = db.insert(documentPrinters).values({ name: 'Büro', host: '10.0.0.50' }).returning().all()[0]!;
+    insertPrintLog({ printerId: printer.id, printedAt: '2026-11-27 09:30:00' });
+    insertPrintLog({ printerId: printer.id, printedAt: '2026-11-27 08:55:00', status: 'failed' });
+    insertPrintLog({ printerId: printer.id, printedAt: '2026-11-27 09:40:00', personName: 'Gast 1', code: 'QX7P' });
+    const [layout] = db.insert(summaryLayouts).values({ name: 'Sammel', documentPrinterId: docPrinter.id }).returning().all();
+    const render = vi.spyOn(summaryRenderer, 'renderSummaryPdf');
+    const service = new SummaryReportService({ db, labelAdapters: fakeLabelAdapter(), documentAdapters: fakeDocumentAdapter() });
+
+    await service.generate(layout!.id, ...WIDE_WINDOW);
+
+    const localTime = (iso: string) => new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(render.mock.calls[0]![0]).toEqual([
+      { name: 'Gast 1', code: 'QX7P', checkinTime: localTime('2026-11-27T09:40:00Z'), isGuest: true },
+      { name: 'Max Muster', code: 'ZRYK', checkinTime: localTime('2026-11-27T08:55:00Z'), isGuest: false },
+    ]);
   });
 });
 

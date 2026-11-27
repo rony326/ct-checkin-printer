@@ -5,6 +5,7 @@ import type { Db } from '../db/client.js';
 import { documentPrinters, mediaTypes, printLog, printers, summaryLayouts } from '../db/schema.js';
 import { VENDOR_DPI } from '../rendering/dimensions.js';
 import { renderSummaryLabelStrip, renderSummaryPdf, type SummaryColumn, type SummaryColumnKey, type SummaryRow } from '../rendering/SummaryRenderer.js';
+import { groupSummaryRows } from './summaryData.js';
 
 export interface SummaryLabelAdapters {
   getAdapter(printer: { id: number; vendor: 'brother-ql' | 'zebra-zpl'; name: string; host: string; port: number }): Promise<LabelPrinterAdapter>;
@@ -25,12 +26,11 @@ export interface GenerateSummaryResult {
   message?: string;
   groupsPrinted: number;
   groupsFailed: number;
-  /** true = keine erfolgreichen Check-ins im Zeitraum, nichts gedruckt (ok bleibt true). */
+  /** true = keine empfangenen Check-ins im Zeitraum, nichts gedruckt (ok bleibt true). */
   empty: boolean;
 }
 
 const COLUMN_LABELS: Record<SummaryColumnKey, string> = { name: 'Name', code: 'Code', checkinTime: 'Zeit' };
-const UNGROUPED_LABEL = 'Ohne Gruppe';
 
 function toSqliteUtcTimestamp(date: Date): string {
   return date.toISOString().slice(0, 19).replace('T', ' ');
@@ -49,8 +49,8 @@ function isSummaryColumnKey(key: string): key is SummaryColumnKey {
 
 /**
  * Gruppen-Sammelausdruck (Bauschritt 10, siehe Plan). Datenquelle ist
- * ausschliesslich der eigene `print_log` (erfolgreiche Drucke im
- * Zeitfenster) — der optionale `verify_against_ct`-Abgleich gegen
+ * ausschliesslich der eigene `print_log` (alle empfangenen Check-ins im
+ * Zeitfenster, auch mit fehlgeschlagenem Druck) — der optionale `verify_against_ct`-Abgleich gegen
  * ChurchTools' eigene Checkin-Liste ist im Schema vorgesehen, aber noch
  * NICHT implementiert (erfordert Recherche zu einem oldApi-Endpunkt für
  * gruppenweise Checkin-Listen, die für diesen Plan nie gemacht wurde) —
@@ -100,16 +100,15 @@ export class SummaryReportService {
     const rows = this.deps.db
       .select()
       .from(printLog)
-      .where(and(eq(printLog.status, 'success'), gte(printLog.printedAt, toSqliteUtcTimestamp(since)), lt(printLog.printedAt, toSqliteUtcTimestamp(until))))
+      .where(and(gte(printLog.printedAt, toSqliteUtcTimestamp(since)), lt(printLog.printedAt, toSqliteUtcTimestamp(until))))
       .all();
 
-    const grouped = new Map<string, SummaryRow[]>();
-    for (const row of rows) {
-      const groupName = row.groupName ?? UNGROUPED_LABEL;
-      const summaryRow: SummaryRow = { name: row.personName ?? '', code: row.code ?? '', checkinTime: formatTime(row.printedAt) };
-      grouped.set(groupName, [...(grouped.get(groupName) ?? []), summaryRow]);
-    }
-    return grouped;
+    return new Map(
+      [...groupSummaryRows(rows, 'Gast')].map(([groupName, entries]) => [
+        groupName,
+        entries.map(({ name, code, printedAt, isGuest }) => ({ name, code, checkinTime: formatTime(printedAt), isGuest })),
+      ]),
+    );
   }
 
   private resolveColumns(columnsJson: string[]): SummaryColumn[] {

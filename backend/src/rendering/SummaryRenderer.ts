@@ -17,6 +17,7 @@ export interface SummaryRow {
   name: string;
   code: string;
   checkinTime: string;
+  isGuest?: boolean;
 }
 
 export type SummaryColumnKey = 'name' | 'code' | 'checkinTime';
