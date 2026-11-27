@@ -5,14 +5,22 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { PNG } from 'pngjs';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedMediaTypes } from '../db/seed.js';
 import { createDb, type Db } from '../db/client.js';
 import type { Env } from '../env.js';
 import { printerGroups, printers } from '../db/schema.js';
 import type { GenerateSummaryResult } from '../orchestrator/SummaryReportService.js';
 import { noopOrchestrator, type OrchestratorLike } from '../orchestrator/orchestratorLike.js';
+import { DEFAULT_SUMMARY_DESIGN } from '../rendering/summaryDesign.js';
+import { renderSummaryPdf } from '../rendering/SummaryRenderer.js';
 import { buildServer } from './server.js';
+
+// Der echte Renderer läuft weiter — der Spion zeigt nur, womit er aufgerufen wird.
+vi.mock('../rendering/SummaryRenderer.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../rendering/SummaryRenderer.js')>();
+  return { ...actual, renderSummaryPdf: vi.fn(actual.renderSummaryPdf) };
+});
 
 let app: FastifyInstance;
 let db: Db;
@@ -752,6 +760,122 @@ describe('Summary-Trigger API', () => {
     const single = await app.inject({ method: 'GET', url: `/api/summary-layouts/${layoutId}`, headers: { cookie: sessionCookie } });
     expect(single.body).not.toContain('triggerSecretEnc');
     expect(single.json().hasTriggerSecret).toBe(true);
+  });
+});
+
+describe('Summary-Vorschau API', () => {
+  const orchestratorStub = {
+    handleIncomingJob: vi.fn<OrchestratorLike['handleIncomingJob']>(),
+    reload: vi.fn<OrchestratorLike['reload']>(),
+    triggerManualSummary: vi.fn<OrchestratorLike['triggerManualSummary']>(),
+    status: vi.fn<OrchestratorLike['status']>(),
+  };
+  const renderSpy = vi.mocked(renderSummaryPdf);
+  let previewApp: FastifyInstance;
+  let previewCookie: string;
+
+  const preview = (payload: Record<string, unknown>) =>
+    previewApp.inject({ method: 'POST', url: '/api/summary-layouts/preview', headers: { cookie: previewCookie }, payload });
+  const pageCount = (pdf: Buffer) => pdf.toString('latin1').match(/\/Type \/Page\b/g)?.length ?? 0;
+
+  beforeAll(async () => {
+    previewApp = await buildServer(db, (app as unknown as { env: Env }).env, orchestratorStub);
+    await previewApp.ready();
+    const loginRes = await previewApp.inject({ method: 'POST', url: '/api/auth/login', payload: { password: 'correcthorsebatterystaple' } });
+    const c = loginRes.cookies.find((x) => x.name === 'sessionId')!;
+    previewCookie = `${c.name}=${c.value}`;
+  });
+
+  afterAll(async () => {
+    await previewApp.close();
+  });
+
+  beforeEach(() => {
+    renderSpy.mockClear();
+  });
+
+  it('verweigert den Zugriff ohne Login', async () => {
+    const res = await previewApp.inject({ method: 'POST', url: '/api/summary-layouts/preview', payload: {} });
+    expect(res.statusCode).toBe(401);
+    expect(renderSpy).not.toHaveBeenCalled();
+  });
+
+  it('liefert für ein leeres Objekt ein mehrseitiges PDF und druckt nie', async () => {
+    const res = await preview({});
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('application/pdf');
+    expect(res.rawPayload.subarray(0, 4).toString()).toBe('%PDF');
+    expect(pageCount(res.rawPayload)).toBeGreaterThanOrEqual(2);
+    for (const method of Object.values(orchestratorStub)) expect(method).not.toHaveBeenCalled();
+  });
+
+  it('verwendet Beispieldaten und die Standards des Ausdrucks', async () => {
+    await preview({});
+    const input = renderSpy.mock.calls[0]![0];
+    expect(input.title).toBe('Sammelausdruck Beispielgruppe');
+    expect(input.columns).toEqual([
+      { key: 'name', label: 'Name' },
+      { key: 'code', label: 'Code' },
+      { key: 'checkinTime', label: 'Zeit' },
+    ]);
+    expect(input.design).toEqual(DEFAULT_SUMMARY_DESIGN);
+    expect(input.logo).toBeUndefined();
+    expect(input.rows).toHaveLength(42);
+    expect(input.rows.filter((r) => r.isGuest).map((r) => r.name)).toEqual(['Gast 1 Beispielgruppe', 'Gast 2 Beispielgruppe']);
+    expect(input.rows.slice(0, 2).every((r) => r.isGuest)).toBe(true);
+    for (const row of input.rows) expect(row.checkinTime).toMatch(/^\d{2}:\d{2}$/);
+  });
+
+  it('übernimmt Titel, Spalten und Design aus der Anfrage', async () => {
+    const res = await preview({
+      titleTemplate: 'Liste {{checkin.group}}',
+      columnsJson: ['name'],
+      designJson: { orientation: 'portrait', guestColumn: { keyword: 'Besuch' } },
+    });
+    expect(res.statusCode).toBe(200);
+    const input = renderSpy.mock.calls[0]![0];
+    expect(input.title).toBe('Liste Beispielgruppe');
+    expect(input.columns).toEqual([{ key: 'name', label: 'Name' }]);
+    expect(input.design.orientation).toBe('portrait');
+    expect(input.rows.filter((r) => r.isGuest).map((r) => r.name)).toEqual(['Besuch 1 Beispielgruppe', 'Besuch 2 Beispielgruppe']);
+  });
+
+  it('nimmt designJson: null als Standard-Design', async () => {
+    expect((await preview({ designJson: null })).statusCode).toBe(200);
+    expect(renderSpy.mock.calls[0]![0].design).toEqual(DEFAULT_SUMMARY_DESIGN);
+  });
+
+  it('bettet ein hochgeladenes Logo ein', async () => {
+    const png = new PNG({ width: 4, height: 4 });
+    const form = multipartRequest({ name: 'Vorschaulogo' }, { field: 'file', filename: 'logo.png', content: PNG.sync.write(png), type: 'image/png' });
+    const { payload, contentType } = await formToInjectPayload(form);
+    const upload = await app.inject({ method: 'POST', url: '/api/logos', headers: { cookie: sessionCookie, 'content-type': contentType }, payload });
+
+    const res = await preview({ designJson: { logoId: upload.json().id } });
+    expect(res.statusCode).toBe(200);
+    expect(renderSpy.mock.calls[0]![0].logo).toEqual(PNG.sync.write(png));
+    expect(res.rawPayload.toString('latin1')).toContain('/Subtype /Image');
+  });
+
+  it('liefert bei unbekannter logoId das PDF ohne Logo', async () => {
+    const res = await preview({ designJson: { logoId: 999999 } });
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload.subarray(0, 4).toString()).toBe('%PDF');
+    expect(renderSpy.mock.calls[0]![0].logo).toBeUndefined();
+  });
+
+  it.each([
+    [{ designJson: { fontSize: 99 } }, 'Schriftgrösse darf höchstens 18 pt sein'],
+    [{ titleTemplate: '' }, 'Titel darf nicht leer sein'],
+    [{ titleTemplate: 5 }, 'Titel muss ein Text sein'],
+    [{ columnsJson: ['alter'] }, 'Unbekannte Spalte'],
+    [{ columnsJson: 'name' }, 'Spalten müssen eine Liste sein'],
+    [[], 'Ungültige Eingabe'],
+  ])('lehnt %j mit 400 ab', async (payload, error) => {
+    const res = await preview(payload as Record<string, unknown>);
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error });
+    expect(renderSpy).not.toHaveBeenCalled();
   });
 });
 

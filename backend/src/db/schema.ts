@@ -159,14 +159,18 @@ export const documentPrinters = sqliteTable('document_printers', {
   ...timestamps,
 });
 
+/** Standards eines Sammel-Layouts — auch die Vorschau verwendet sie. */
+export const DEFAULT_SUMMARY_COLUMNS = ['name', 'code', 'checkinTime'];
+export const DEFAULT_SUMMARY_TITLE = 'Sammelausdruck {{checkin.group}}';
+
 export const summaryLayouts = sqliteTable('summary_layouts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
   groupByField: text('group_by_field').notNull().default('checkin.group'),
   printerId: integer('printer_id').references(() => printers.id),
   documentPrinterId: integer('document_printer_id').references(() => documentPrinters.id),
-  columnsJson: text('columns_json', { mode: 'json' }).notNull().$type<string[]>().default(['name', 'code', 'checkinTime']),
-  titleTemplate: text('title_template').notNull().default('Sammelausdruck {{checkin.group}}'),
+  columnsJson: text('columns_json', { mode: 'json' }).notNull().$type<string[]>().default(DEFAULT_SUMMARY_COLUMNS),
+  titleTemplate: text('title_template').notNull().default(DEFAULT_SUMMARY_TITLE),
   trigger: text('trigger', { enum: ['window_close', 'manual'] })
     .notNull()
     .default('manual'),

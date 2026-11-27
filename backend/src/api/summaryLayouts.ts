@@ -4,9 +4,17 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../auth/routes.js';
 import { decryptSecret, encryptSecret, secretsEqual } from '../crypto/secrets.js';
-import { summaryLayouts } from '../db/schema.js';
-import type { GenerateSummaryResult } from '../orchestrator/SummaryReportService.js';
-import { summaryDesignSchema } from '../rendering/summaryDesign.js';
+import { DEFAULT_SUMMARY_COLUMNS, DEFAULT_SUMMARY_TITLE, summaryLayouts } from '../db/schema.js';
+import {
+  formatSummaryTitle,
+  renderGroupPdf,
+  resolveSummaryColumns,
+  toSqliteUtcTimestamp,
+  toSummaryRows,
+  type GenerateSummaryResult,
+} from '../orchestrator/SummaryReportService.js';
+import { groupSummaryRows, type CheckinLogRow } from '../orchestrator/summaryData.js';
+import { resolveSummaryDesign, summaryDesignSchema } from '../rendering/summaryDesign.js';
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -16,14 +24,34 @@ const createSchema = z.object({
   groupByField: z.string().min(1).optional(),
   printerId: z.number().nullable().optional(),
   documentPrinterId: z.number().nullable().optional(),
-  columnsJson: z.array(z.enum(['name', 'code', 'checkinTime'])).optional(),
-  titleTemplate: z.string().min(1).optional(),
+  columnsJson: z
+    .array(z.enum(['name', 'code', 'checkinTime'], { errorMap: () => ({ message: 'Unbekannte Spalte' }) }), {
+      invalid_type_error: 'Spalten müssen eine Liste sein',
+    })
+    .optional(),
+  titleTemplate: z.string({ invalid_type_error: 'Titel muss ein Text sein' }).min(1, 'Titel darf nicht leer sein').optional(),
   trigger: z.enum(['window_close', 'manual']).optional(),
   verifyAgainstCt: z.boolean().optional(),
   /** Gestaltung der A4-Liste. Bei PUT: weggelassen = unverändert, null = zurück auf die Standards, Objekt = ersetzt komplett. */
   designJson: summaryDesignSchema.nullable().optional(),
 });
 const updateSchema = createSchema.partial();
+const previewSchema = z.object(
+  { titleTemplate: createSchema.shape.titleTemplate, columnsJson: createSchema.shape.columnsJson, designJson: createSchema.shape.designJson },
+  { invalid_type_error: 'Ungültige Eingabe' },
+);
+
+const PREVIEW_GROUP = 'Beispielgruppe';
+
+/** Beispieldaten der Vorschau: 2 Gäste und 40 weitere Personen — genug für mehr als eine Seite. */
+function previewLogRows(guestKeyword: string): CheckinLogRow[] {
+  const names = [
+    ...[1, 2].map((n) => `${guestKeyword} ${n} ${PREVIEW_GROUP}`),
+    ...Array.from({ length: 40 }, (_, i) => `Beispielperson ${i + 1}`),
+  ];
+  const printedAt = toSqliteUtcTimestamp(new Date());
+  return names.map((personName, i) => ({ groupName: PREVIEW_GROUP, personName, code: `B${String(i + 1).padStart(3, '0')}`, printedAt }));
+}
 
 const triggerAdminSchema = z.object({ enabled: z.boolean().optional(), regenerateSecret: z.boolean().optional() });
 
@@ -105,6 +133,26 @@ export async function registerSummaryLayoutRoutes(app: FastifyInstance) {
     const id = Number((request.params as { id: string }).id);
     app.db.delete(summaryLayouts).where(eq(summaryLayouts.id, id)).run();
     return { ok: true };
+  });
+
+  // Vorschau der A4-Liste mit Beispieldaten, auch für noch nicht gespeicherte Einstellungen. Druckt nie.
+  app.post('/api/summary-layouts/preview', { preHandler: requireAuth }, async (request, reply) => {
+    const parsed = previewSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Ungültige Eingabe' });
+
+    const design = resolveSummaryDesign(parsed.data.designJson);
+    const { keyword } = design.guestColumn;
+    const entries = groupSummaryRows(previewLogRows(keyword), keyword).get(PREVIEW_GROUP)!;
+    const pdf = await renderGroupPdf(
+      { db: app.db, dbPath: app.env.DB_PATH },
+      toSummaryRows(entries),
+      resolveSummaryColumns(parsed.data.columnsJson ?? DEFAULT_SUMMARY_COLUMNS),
+      formatSummaryTitle(parsed.data.titleTemplate ?? DEFAULT_SUMMARY_TITLE, PREVIEW_GROUP),
+      design,
+    );
+
+    reply.header('Content-Type', 'application/pdf');
+    return reply.send(pdf);
   });
 
   // "Sammelausdruck jetzt drucken" (siehe Plan) — ohne Zeitraumangabe wird der heutige Tag (00:00 bis jetzt) verwendet.
