@@ -5,9 +5,15 @@ import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { requireAuth } from '../auth/routes.js';
 import { fonts } from '../db/schema.js';
+import { FALLBACK_BOLD_FONT_PATH, FALLBACK_REGULAR_FONT_PATH } from '../rendering/LabelRenderer.js';
 import { getUploadsDir } from '../storage/uploadsDir.js';
 
 const ALLOWED_EXTENSIONS = ['.ttf', '.otf'];
+
+const DEFAULT_FONT_PATHS = new Map([
+  ['regular', FALLBACK_REGULAR_FONT_PATH],
+  ['bold', FALLBACK_BOLD_FONT_PATH],
+]);
 
 export async function registerFontRoutes(app: FastifyInstance) {
   app.get('/api/fonts', { preHandler: requireAuth }, async () => {
@@ -30,6 +36,16 @@ export async function registerFontRoutes(app: FastifyInstance) {
 
     const [row] = app.db.insert(fonts).values({ name, filePath: storedFilename }).returning().all();
     return reply.code(201).send(row);
+  });
+
+  // Die mitgelieferte Druckschrift, damit der Editor mit denselben Massen
+  // rechnet wie der Druck.
+  app.get('/api/fonts/default/:variant', { preHandler: requireAuth }, async (request, reply) => {
+    const fontPath = DEFAULT_FONT_PATHS.get((request.params as { variant: string }).variant);
+    if (!fontPath) return reply.code(404).send({ error: 'Schrift nicht gefunden' });
+
+    reply.header('Content-Type', 'font/ttf');
+    return reply.send(await readFile(fontPath));
   });
 
   // Liefert die Rohdaten aus, damit der Browser sie im visuellen Editor per

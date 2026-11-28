@@ -4,6 +4,7 @@ import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedMediaTypes } from '../db/seed.js';
@@ -128,6 +129,27 @@ describe('Fonts API', () => {
   });
 });
 
+describe('Druckschrift für den Editor', () => {
+  it.each(['regular', 'bold'])('liefert die mitgelieferte Schrift %s als TrueType-Datei', async (variant) => {
+    const res = await app.inject({ method: 'GET', url: `/api/fonts/default/${variant}`, headers: { cookie: sessionCookie } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toMatch(/^font\/ttf/);
+    expect(res.rawPayload.readUInt32BE(0)).toBe(0x00010000);
+  });
+
+  it('verweigert den Zugriff ohne Login', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/fonts/default/regular' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it.each(['italic', 'constructor'])('kennt die Variante %s nicht', async (variant) => {
+    const res = await app.inject({ method: 'GET', url: `/api/fonts/default/${variant}`, headers: { cookie: sessionCookie } });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe('Schrift nicht gefunden');
+  });
+});
+
 describe('Logos API', () => {
   it.each([
     ['kaputt.png', Buffer.from('kein Bild')],
@@ -153,6 +175,45 @@ describe('Logos API', () => {
     expect(uploadRes.statusCode).toBe(201);
     const listRes = await app.inject({ method: 'GET', url: '/api/logos', headers: { cookie: sessionCookie } });
     expect(listRes.json().some((l: { name: string }) => l.name === 'Gemeindelogo')).toBe(true);
+  });
+
+  async function uploadLogo(filename: string, content: Buffer): Promise<number> {
+    const form = multipartRequest({}, { field: 'file', filename, content, type: 'application/octet-stream' });
+    const { payload, contentType } = await formToInjectPayload(form);
+    const res = await app.inject({ method: 'POST', url: '/api/logos', headers: { cookie: sessionCookie, 'content-type': contentType }, payload });
+    expect(res.statusCode).toBe(201);
+    return res.json().id;
+  }
+
+  const smallPng = () => PNG.sync.write(new PNG({ width: 4, height: 4 }));
+  const smallJpeg = () => Buffer.from(jpeg.encode({ width: 4, height: 4, data: Buffer.alloc(4 * 4 * 4, 200) }, 80).data);
+
+  it.each([
+    ['logo.png', smallPng(), 'image/png'],
+    ['logo.jpg', smallJpeg(), 'image/jpeg'],
+    ['logo.jpeg', smallJpeg(), 'image/jpeg'],
+    // Der Inhalt zählt, nicht die Endung.
+    ['eigentlich-jpeg.png', smallJpeg(), 'image/jpeg'],
+  ])('liefert die Bilddatei %s unverändert aus', async (filename, content, expectedType) => {
+    const id = await uploadLogo(filename, content);
+
+    const res = await app.inject({ method: 'GET', url: `/api/logos/${id}/file`, headers: { cookie: sessionCookie } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe(expectedType);
+    expect(res.rawPayload).toEqual(content);
+  });
+
+  it('meldet 404 für ein unbekanntes Logo', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/logos/999999/file', headers: { cookie: sessionCookie } });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe('Logo nicht gefunden');
+  });
+
+  it('liefert die Bilddatei nicht ohne Login aus', async () => {
+    const id = await uploadLogo('geheim.png', smallPng());
+    const res = await app.inject({ method: 'GET', url: `/api/logos/${id}/file` });
+    expect(res.statusCode).toBe(401);
   });
 });
 

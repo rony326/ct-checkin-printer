@@ -38,6 +38,18 @@ export async function registerLogoRoutes(app: FastifyInstance) {
     return reply.code(201).send(row);
   });
 
+  // Liefert die Bilddatei aus, damit der Editor das Logo selbst zeichnen kann.
+  app.get('/api/logos/:id/file', { preHandler: requireAuth }, async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    const row = app.db.select().from(logos).where(eq(logos.id, id)).get();
+    if (!row) return reply.code(404).send({ error: 'Logo nicht gefunden' });
+
+    const data = await readFile(path.join(getUploadsDir(app.env.DB_PATH, 'logos'), row.filePath));
+    // Nach dem Inhalt statt nach der Endung; hochladen lässt sich nur PNG oder JPEG.
+    reply.header('Content-Type', data[0] === 0xff ? 'image/jpeg' : 'image/png');
+    return reply.send(data);
+  });
+
   app.delete('/api/logos/:id', { preHandler: requireAuth }, async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const row = app.db.select().from(logos).where(eq(logos.id, id)).get();
