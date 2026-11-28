@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, postForBlob, uploadFile } from '../api/client.js';
-import { Canvas } from '../editor/Canvas.js';
+import { Canvas, DEFAULT_CONTINUOUS_HEIGHT_MM } from '../editor/Canvas.js';
 import { PropertiesPanel } from '../editor/PropertiesPanel.js';
 import { Toolbar } from '../editor/Toolbar.js';
 import type { FontEntry, LabelElement, LabelElementType, LabelLayout, LogoEntry, MediaType, VariableDefs } from '../types.js';
+import { useFieldId } from '../components/useFieldId.js';
 
 /**
  * `crypto.randomUUID()` existiert nur in sicheren Kontexten (HTTPS oder
@@ -38,6 +39,10 @@ const DEFAULT_ELEMENT_BY_TYPE: Record<LabelElementType, (id: string) => LabelEle
 
 const EMPTY_VARIABLES: VariableDefs = { textFields: [], qrContents: [] };
 
+function snapshotOf(elements: LabelElement[], mediaId: number | null): string {
+  return JSON.stringify({ elements, mediaId });
+}
+
 /** Registriert hochgeladene Fonts als @font-face, damit der interaktive Editor-Canvas dieselbe Schrift wie der echte Druck zeigt. */
 function useFontFaces(fonts: FontEntry[]) {
   useEffect(() => {
@@ -51,6 +56,7 @@ function useFontFaces(fonts: FontEntry[]) {
 }
 
 export function LayoutEditor() {
+  const fid = useFieldId();
   const { id } = useParams<{ id: string }>();
   const [layout, setLayout] = useState<LabelLayout | null>(null);
   const [elements, setElements] = useState<LabelElement[]>([]);
@@ -63,19 +69,31 @@ export function LayoutEditor() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<{ text: string; isError: boolean } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  /** Stand beim Laden bzw. letzten Speichern — Grundlage für die Anzeige „Nicht gespeichert". */
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
   const previewUrlRef = useRef<string | null>(null);
 
   useFontFaces(fonts);
 
   async function loadAll() {
-    const [layoutRes, mediaRes, fontsRes, logosRes, variablesRes] = await Promise.all([
+    let results;
+    try {
+      results = await Promise.all([
       api.get<LabelLayout>(`/api/label-layouts/${id}`),
       api.get<MediaType[]>('/api/media-types'),
       api.get<FontEntry[]>('/api/fonts'),
       api.get<LogoEntry[]>('/api/logos'),
       api.get<VariableDefs>('/api/variables'),
-    ]);
+      ]);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Laden fehlgeschlagen');
+      return;
+    }
+    const [layoutRes, mediaRes, fontsRes, logosRes, variablesRes] = results;
+    setLoadError(null);
+    setSavedSnapshot(snapshotOf(layoutRes.elementsJson, layoutRes.mediaId));
     setLayout(layoutRes);
     setElements(layoutRes.elementsJson);
     setMediaId(layoutRes.mediaId);
@@ -91,6 +109,46 @@ export function LayoutEditor() {
 
   const media = useMemo(() => mediaTypes.find((m) => m.id === mediaId) ?? null, [mediaTypes, mediaId]);
   const selectedElement = useMemo(() => elements.find((el) => el.id === selectedId) ?? null, [elements, selectedId]);
+  const isDirty = savedSnapshot !== null && snapshotOf(elements, mediaId) !== savedSnapshot;
+
+  // Ein altes „Gespeichert." darf nach weiteren Änderungen nicht stehen bleiben.
+  useEffect(() => {
+    if (isDirty) setSaveMessage((prev) => (prev && !prev.isError ? null : prev));
+  }, [isDirty]);
+
+  // Schutz vor versehentlichem Schliessen/Neuladen mit ungespeicherten Änderungen.
+  useEffect(() => {
+    if (!isDirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [isDirty]);
+
+  // Pfeiltasten verschieben das gewählte Element um 1 mm (mit Shift um 5 mm) — präziser als Ziehen.
+  useEffect(() => {
+    if (!selectedId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.closest('input, textarea, select, [contenteditable="true"]') || event.altKey || event.metaKey || event.ctrlKey)) return;
+      const step = event.shiftKey ? 5 : 1;
+      const delta: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+      const move = delta[event.key];
+      if (!move) return;
+      event.preventDefault();
+      // Gleiche Grenzen wie beim Ziehen (siehe Canvas): innerhalb des Etiketts bleiben.
+      const maxX = media?.widthMm ?? Infinity;
+      const maxY = media?.heightMm ?? DEFAULT_CONTINUOUS_HEIGHT_MM;
+      const clamp = (v: number, max: number) => Math.min(Math.max(0, v), max);
+      setElements((prev) =>
+        prev.map((el) => (el.id === selectedId ? { ...el, xMm: clamp(el.xMm + move[0], maxX), yMm: clamp(el.yMm + move[1], maxY) } : el)),
+      );
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedId, media]);
+
   const fontNameById = useMemo(() => Object.fromEntries(fonts.map((f) => [f.id, `font-${f.id}`])), [fonts]);
 
   // Live-Vorschau: echter Server-Renderer, debounced bei jeder Änderung.
@@ -144,16 +202,23 @@ export function LayoutEditor() {
     setSaveMessage(null);
     try {
       await api.put(`/api/label-layouts/${id}`, { elementsJson: elements, mediaId: mediaId ?? undefined });
-      setSaveMessage('Gespeichert.');
+      setSavedSnapshot(snapshotOf(elements, mediaId));
+      setSaveMessage({ text: 'Gespeichert.', isError: false });
     } catch (err) {
-      setSaveMessage(err instanceof Error ? err.message : 'Speichern fehlgeschlagen');
+      setSaveMessage({ text: err instanceof Error ? err.message : 'Speichern fehlgeschlagen', isError: true });
     } finally {
       setSaving(false);
     }
   }
 
   async function handleUploadFont(file: File) {
-    const created = (await uploadFile('/api/fonts', file, { name: file.name.replace(/\.(ttf|otf)$/i, '') })) as FontEntry;
+    let created: FontEntry;
+    try {
+      created = (await uploadFile('/api/fonts', file, { name: file.name.replace(/\.(ttf|otf)$/i, '') })) as FontEntry;
+    } catch (err) {
+      setSaveMessage({ text: err instanceof Error ? err.message : 'Schriftart-Upload fehlgeschlagen', isError: true });
+      return;
+    }
     setFonts((prev) => [...prev, created]);
     if (selectedElement && (selectedElement.type === 'text' || selectedElement.type === 'static')) {
       updateElement({ ...selectedElement, fontId: created.id });
@@ -161,7 +226,13 @@ export function LayoutEditor() {
   }
 
   async function handleUploadLogo(file: File) {
-    const created = (await uploadFile('/api/logos', file, { name: file.name.replace(/\.(png|jpe?g)$/i, '') })) as LogoEntry;
+    let created: LogoEntry;
+    try {
+      created = (await uploadFile('/api/logos', file, { name: file.name.replace(/\.(png|jpe?g)$/i, '') })) as LogoEntry;
+    } catch (err) {
+      setSaveMessage({ text: err instanceof Error ? err.message : 'Logo-Upload fehlgeschlagen', isError: true });
+      return;
+    }
     setLogos((prev) => [...prev, created]);
     if (selectedElement && selectedElement.type === 'logo') {
       updateElement({ ...selectedElement, logoId: created.id });
@@ -171,9 +242,24 @@ export function LayoutEditor() {
   if (!layout) {
     return (
       <div className="page">
-        <p className="hint" style={{ padding: '1.5rem' }}>
-          Lädt…
-        </p>
+        <div className="topbar">
+          <Link to="/layouts" className="topbar-back">
+            ← Etiketten-Layouts
+          </Link>
+          <h1>Layout</h1>
+        </div>
+        <div className="page-body">
+          {loadError ? (
+            <div role="alert">
+              <p className="error-text">{loadError}</p>
+              <button className="btn" onClick={loadAll}>
+                Erneut versuchen
+              </button>
+            </div>
+          ) : (
+            <p className="hint">Lädt…</p>
+          )}
+        </div>
       </div>
     );
   }
@@ -185,17 +271,23 @@ export function LayoutEditor() {
           ← Etiketten-Layouts
         </Link>
         <h1>{layout.name}</h1>
-        {saveMessage && <span className="hint">{saveMessage}</span>}
+        {saveMessage ? (
+          <span className={saveMessage.isError ? 'error-text' : 'success-text'} role="status">
+            {saveMessage.text}
+          </span>
+        ) : (
+          isDirty && <span className="dirty-badge">● Nicht gespeichert</span>
+        )}
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
           {saving ? 'Speichert…' : 'Speichern'}
         </button>
       </div>
 
       {!mediaId ? (
-        <div style={{ padding: '1.5rem', maxWidth: 420 }}>
+        <div className="page-body" style={{ maxWidth: 420 }}>
           <div className="field">
-            <label>Etikettengrösse wählen, um mit dem Entwerfen zu beginnen</label>
-            <select value="" onChange={(e) => setMediaId(Number(e.target.value))}>
+            <label htmlFor={fid('f1')}>Etikettengrösse wählen, um mit dem Entwerfen zu beginnen</label>
+            <select id={fid('f1')} value="" onChange={(e) => setMediaId(Number(e.target.value))}>
               <option value="" disabled>
                 Bitte wählen
               </option>
@@ -208,13 +300,13 @@ export function LayoutEditor() {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr 300px', gap: '1.25rem', padding: '1.25rem', flex: 1, minHeight: 0 }}>
+        <div className="editor-grid">
           <Toolbar elements={elements} selectedId={selectedId} onAdd={addElement} onSelect={setSelectedId} />
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', overflow: 'auto' }}>
+          <div className="editor-stage">
             <div>
               <p className="hint" style={{ textAlign: 'center', marginBottom: '0.5rem' }}>
-                Entwurf — Position per Ziehen anpassen
+                Entwurf — ziehen oder mit Pfeiltasten verschieben (Shift = 5 mm)
               </p>
               <Canvas
                 media={media}
@@ -234,7 +326,7 @@ export function LayoutEditor() {
               {previewError ? (
                 <p className="error-text">{previewError}</p>
               ) : previewUrl ? (
-                <img src={previewUrl} alt="Etiketten-Vorschau" style={{ boxShadow: '0 4px 16px rgba(28,27,25,0.14)', maxWidth: 320 }} />
+                <img src={previewUrl} alt="Etiketten-Vorschau" className="paper" style={{ maxWidth: 320, display: 'block' }} />
               ) : (
                 <p className="hint">Wird gerendert…</p>
               )}

@@ -1,5 +1,6 @@
 import type { ChangeEvent } from 'react';
 import type { Align, FontEntry, LabelElement, LogoEntry, QrContentPath, Rotate, TextFieldPath, VariableDefs } from '../types.js';
+import { useFieldId } from '../components/useFieldId.js';
 
 interface Props {
   element: LabelElement | null;
@@ -13,15 +14,17 @@ interface Props {
 }
 
 function NumberField({ label, value, onChange, min }: { label: string; value: number; onChange: (v: number) => void; min?: number }) {
+  const fid = useFieldId();
   return (
     <div className="field">
-      <label>{label}</label>
-      <input type="number" value={value} min={min} onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(Number(e.target.value))} />
+      <label htmlFor={fid('f1')}>{label}</label>
+      <input id={fid('f1')} type="number" value={value} min={min} onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(Number(e.target.value))} />
     </div>
   );
 }
 
 export function PropertiesPanel({ element, variables, fonts, logos, onChange, onDelete, onUploadFont, onUploadLogo }: Props) {
+  const fid = useFieldId();
   if (!element) {
     return (
       <aside className="panel" style={{ padding: '1rem' }}>
@@ -39,8 +42,8 @@ export function PropertiesPanel({ element, variables, fonts, logos, onChange, on
 
   const rotateField = (
     <div className="field">
-      <label>Drehung</label>
-      <select value={element.rotate ?? '0'} onChange={(e) => onChange({ ...element, rotate: e.target.value as Rotate })}>
+      <label htmlFor={fid('f1')}>Drehung</label>
+      <select id={fid('f1')} value={element.rotate ?? '0'} onChange={(e) => onChange({ ...element, rotate: e.target.value as Rotate })}>
         <option value="0">Normal (0°)</option>
         <option value="90">90°</option>
         <option value="180">180°</option>
@@ -65,8 +68,8 @@ export function PropertiesPanel({ element, variables, fonts, logos, onChange, on
         <>
           {element.type === 'text' ? (
             <div className="field">
-              <label>Feld</label>
-              <select value={element.field} onChange={(e) => onChange({ ...element, field: e.target.value as TextFieldPath })}>
+              <label htmlFor={fid('f2')}>Feld</label>
+              <select id={fid('f2')} value={element.field} onChange={(e) => onChange({ ...element, field: e.target.value as TextFieldPath })}>
                 {variables.textFields.map((f) => (
                   <option key={f.path} value={f.path}>
                     {f.label}
@@ -76,23 +79,23 @@ export function PropertiesPanel({ element, variables, fonts, logos, onChange, on
             </div>
           ) : (
             <div className="field">
-              <label>Text (mehrzeilig möglich)</label>
-              <textarea rows={3} value={element.value} onChange={(e) => onChange({ ...element, value: e.target.value })} />
+              <label htmlFor={fid('f3')}>Text (mehrzeilig möglich)</label>
+              <textarea id={fid('f3')} rows={3} value={element.value} onChange={(e) => onChange({ ...element, value: e.target.value })} />
             </div>
           )}
 
           {element.type === 'text' && element.field !== 'checkin.extra' && (
             <div className="field">
-              <label>Vorangestellter Text (optional)</label>
-              <input type="text" value={element.prefix ?? ''} onChange={(e) => onChange({ ...element, prefix: e.target.value })} placeholder="z.B. Abholcode: " />
+              <label htmlFor={fid('f4')}>Vorangestellter Text (optional)</label>
+              <input id={fid('f4')} type="text" value={element.prefix ?? ''} onChange={(e) => onChange({ ...element, prefix: e.target.value })} placeholder="z.B. Abholcode: " />
             </div>
           )}
 
           <div className="field-row">
             <NumberField label="Schriftgrösse" value={element.fontSize} min={1} onChange={(v) => onChange({ ...element, fontSize: v })} />
             <div className="field">
-              <label>Ausrichtung</label>
-              <select value={element.align} onChange={(e) => onChange({ ...element, align: e.target.value as Align })}>
+              <label htmlFor={fid('f5')}>Ausrichtung</label>
+              <select id={fid('f5')} value={element.align} onChange={(e) => onChange({ ...element, align: e.target.value as Align })}>
                 <option value="left">Links</option>
                 <option value="center">Zentriert</option>
                 <option value="right">Rechts</option>
@@ -111,8 +114,8 @@ export function PropertiesPanel({ element, variables, fonts, logos, onChange, on
           </div>
 
           <div className="field">
-            <label>Schriftart</label>
-            <select
+            <label htmlFor={fid('f6')}>Schriftart</label>
+            <select id={fid('f6')}
               value={element.fontId ?? ''}
               onChange={(e) => onChange({ ...element, fontId: e.target.value ? Number(e.target.value) : undefined })}
             >
@@ -132,8 +135,8 @@ export function PropertiesPanel({ element, variables, fonts, logos, onChange, on
         <>
           <NumberField label="Höhe (mm)" value={element.heightMm} min={1} onChange={(v) => onChange({ ...element, heightMm: v })} />
           <div className="field">
-            <label>Logo</label>
-            <select value={element.logoId} onChange={(e) => onChange({ ...element, logoId: Number(e.target.value) })}>
+            <label htmlFor={fid('f7')}>Logo</label>
+            <select id={fid('f7')} value={element.logoId} onChange={(e) => onChange({ ...element, logoId: Number(e.target.value) })}>
               <option value="">Bitte wählen</option>
               {logos.map((l) => (
                 <option key={l.id} value={l.id}>
@@ -149,8 +152,8 @@ export function PropertiesPanel({ element, variables, fonts, logos, onChange, on
       {element.type === 'qr' && (
         <>
           <div className="field">
-            <label>Inhalt</label>
-            <select value={element.content} onChange={(e) => onChange({ ...element, content: e.target.value as QrContentPath })}>
+            <label htmlFor={fid('f8')}>Inhalt</label>
+            <select id={fid('f8')} value={element.content} onChange={(e) => onChange({ ...element, content: e.target.value as QrContentPath })}>
               {variables.qrContents.map((c) => (
                 <option key={c.path} value={c.path}>
                   {c.label}

@@ -1,49 +1,232 @@
+/* ---------- Shell & Navigation ---------- */
+
+.shell {
+  display: flex;
+  min-height: 100%;
+}
+
+.nav {
+  width: 13rem;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  padding: 1.25rem 0.75rem;
+}
+
+.nav-brand {
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+  padding: 0 0.6rem;
+  margin-bottom: 1.25rem;
+}
+
+.nav-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  flex: 1;
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.nav-group-label {
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 0.6rem;
+  margin-bottom: 0.2rem;
+}
+
+.nav-link {
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  text-decoration: none;
+  color: var(--ink);
+  transition:
+    background-color var(--dur-ui) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+
+.nav-link.active {
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
+.nav-link:active {
+  transform: scale(var(--press-scale, 0.98));
+}
+
+.nav-footer {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.nav-logout {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+.shell-main {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (hover: hover) {
+  .nav-link:not(.active):hover,
+  .nav-logout:hover {
+    background: var(--surface-sunken);
+    color: var(--ink);
+  }
+}
+
+/* Schmale Bildschirme: Navigation wird zur horizontal scrollbaren Leiste oben. */
+@media (max-width: 760px) {
+  .shell {
+    flex-direction: column;
+  }
+  .nav {
+    width: auto;
+    height: auto;
+    position: static;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    padding: 0.5rem 0.75rem;
+  }
+  .nav-brand {
+    margin: 0;
+    white-space: nowrap;
+  }
+  .nav-groups,
+  .nav-group {
+    flex-direction: row;
+    gap: 0.1rem;
+  }
+  .nav-group-label {
+    display: none;
+  }
+  .nav-link,
+  .nav-logout {
+    white-space: nowrap;
+  }
+  .nav-footer {
+    margin: 0;
+    padding: 0;
+    border: none;
+  }
+}
+
+/* ---------- Seite & Kopfleiste ---------- */
+
 .page {
   min-height: 100%;
   display: flex;
   flex-direction: column;
 }
 
+.page-body {
+  padding: 1.5rem;
+  width: 100%;
+}
+
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.75rem 1.25rem;
+  min-height: 3.25rem;
+  padding: 0.6rem 1.25rem;
   border-bottom: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--chrome);
+  -webkit-backdrop-filter: var(--chrome-blur);
+  backdrop-filter: var(--chrome-blur);
 }
 
 .topbar h1 {
-  font-size: 1rem;
+  font-size: 1.05rem;
   font-weight: 600;
   margin: 0;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbar-back {
   color: var(--muted);
   text-decoration: none;
   font-size: 0.9rem;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  white-space: nowrap;
 }
 
-.topbar-back:hover {
-  color: var(--ink);
+@media (hover: hover) {
+  .topbar-back:hover {
+    color: var(--ink);
+  }
 }
+
+@media (max-width: 760px) {
+  .page-body {
+    padding: 1rem;
+  }
+  .topbar {
+    position: static;
+    padding: 0.6rem 1rem;
+  }
+}
+
+/* ---------- Buttons ---------- */
 
 .btn {
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink);
   padding: 0.45rem 0.9rem;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-weight: 500;
   font-size: 0.85rem;
   line-height: 1.2;
-  transition: border-color 0.15s ease;
+  white-space: nowrap;
+  transition:
+    border-color var(--dur-ui) var(--ease-out),
+    background-color var(--dur-ui) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
 }
 
-.btn:hover {
-  border-color: var(--muted);
+/* Rückmeldung schon beim Drücken, nicht erst beim Loslassen. */
+.btn:active:not(:disabled) {
+  transform: scale(var(--press-scale, 0.97));
 }
 
 .btn-primary {
@@ -52,31 +235,80 @@
   color: var(--accent-ink);
 }
 
-.btn-primary:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-}
-
-.btn:disabled,
-.btn-primary:disabled {
+.btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
 .btn-danger {
   color: var(--danger);
-  border-color: var(--line);
 }
 
-.btn-danger:hover {
-  border-color: var(--danger);
-  background: var(--danger-bg);
+@media (hover: hover) {
+  .btn:hover:not(:disabled) {
+    border-color: var(--line-strong);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+  .btn-danger:hover:not(:disabled) {
+    border-color: var(--danger);
+    background: var(--danger-bg);
+  }
 }
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Grosse Auswahlkarten (z.B. Einzel- vs. Router-Drucker). */
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+}
+
+.choice-card {
+  text-align: left;
+  padding: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  transition:
+    border-color var(--dur-ui) var(--ease-out),
+    box-shadow var(--dur-ui) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+
+.choice-card strong {
+  font-size: 0.95rem;
+}
+
+.choice-card:active {
+  transform: scale(var(--press-scale, 0.985));
+}
+
+@media (hover: hover) {
+  .choice-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+}
+
+/* ---------- Flächen & Formulare ---------- */
 
 .panel {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
+}
+
+.panel h2 {
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .field {
@@ -84,12 +316,15 @@
   flex-direction: column;
   gap: 0.3rem;
   margin-bottom: 0.9rem;
+  min-width: 0;
 }
 
-.field label {
+.field label,
+.field .field-label {
   font-size: 0.78rem;
   color: var(--muted);
   font-weight: 500;
+  letter-spacing: 0.005em;
 }
 
 .field input[type='text'],
@@ -98,19 +333,35 @@
 .field select,
 .field textarea {
   border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.6rem;
   background: var(--surface);
   width: 100%;
+  transition:
+    border-color var(--dur-ui) var(--ease-out),
+    box-shadow var(--dur-ui) var(--ease-out);
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.field input:disabled {
+  opacity: 0.55;
 }
 
 .field-row {
   display: flex;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0 0.75rem;
 }
 
 .field-row > .field {
-  flex: 1;
+  flex: 1 1 10rem;
 }
 
 .checkbox-field {
@@ -120,6 +371,13 @@
   font-size: 0.85rem;
   margin-bottom: 0.9rem;
 }
+
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
+}
+
+/* ---------- Text & Rückmeldungen ---------- */
 
 .hint {
   color: var(--muted);
@@ -131,9 +389,41 @@
   font-size: 0.85rem;
 }
 
+.success-text {
+  color: var(--success);
+  font-size: 0.85rem;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  margin-right: 0.4rem;
+  vertical-align: 0.05em;
+  background: currentColor;
+}
+
+.dirty-badge {
+  font-size: 0.78rem;
+  color: var(--warning);
+  white-space: nowrap;
+}
+
+/* ---------- Tabellen ---------- */
+
+.table-scroll {
+  overflow-x: auto;
+}
+
 table.list {
   width: 100%;
   border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
 }
 
 table.list th {
@@ -141,8 +431,10 @@ table.list th {
   font-size: 0.75rem;
   color: var(--muted);
   font-weight: 500;
+  letter-spacing: 0.01em;
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--line);
+  white-space: nowrap;
 }
 
 table.list td {
@@ -156,8 +448,86 @@ table.list tr:last-child td {
 
 table.list tr.clickable {
   cursor: pointer;
+  transition: background-color var(--dur-ui) var(--ease-out);
 }
 
-table.list tr.clickable:hover {
-  background: var(--bg);
+table.list tr.clickable:active {
+  background: var(--surface-sunken);
+}
+
+@media (hover: hover) {
+  table.list tr.clickable:hover {
+    background: var(--surface-sunken);
+  }
+}
+
+/* ---------- Etiketten-Editor ---------- */
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: 13.75rem minmax(0, 1fr) 18.75rem;
+  gap: 1.25rem;
+  padding: 1.25rem;
+  flex: 1;
+  min-height: 0;
+  align-items: start;
+}
+
+.editor-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  align-items: center;
+  overflow: auto;
+}
+
+.paper {
+  display: inline-block;
+  background: #fff;
+  box-shadow: var(--shadow-paper);
+  /* Ziehen auf Touch-Geräten darf die Seite nicht scrollen. */
+  touch-action: none;
+}
+
+@media (max-width: 1100px) {
+  .editor-grid {
+    grid-template-columns: 12rem minmax(0, 1fr);
+  }
+  .editor-grid > :last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .editor-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 1rem;
+  }
+}
+
+/* ---------- Anmeldung ---------- */
+
+.login {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 22rem;
+  padding: 2rem;
+}
+
+.login-card h1 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.25rem;
+}
+
+.login-card .btn {
+  width: 100%;
+  padding: 0.6rem 0.9rem;
 }

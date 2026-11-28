@@ -9,11 +9,19 @@ export function ChurchToolsSettings() {
   const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   async function load() {
-    const res = await api.get<ChurchToolsConnectionState>('/api/churchtools-connection');
+    let res: ChurchToolsConnectionState;
+    try {
+      res = await api.get<ChurchToolsConnectionState>('/api/churchtools-connection');
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Laden fehlgeschlagen');
+      return;
+    }
+    setLoadError(null);
     setState(res);
     if (res.baseUrl) setBaseUrl(res.baseUrl);
     if (res.username) setUsername(res.username);
@@ -30,10 +38,10 @@ export function ChurchToolsSettings() {
     try {
       await api.put('/api/churchtools-connection', { baseUrl, username, ...(password ? { password } : {}) });
       setPassword('');
-      setMessage('Gespeichert.');
+      setMessage({ text: 'Gespeichert.', isError: false });
       await load();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Speichern fehlgeschlagen');
+      setMessage({ text: err instanceof Error ? err.message : 'Speichern fehlgeschlagen', isError: true });
     } finally {
       setSaving(false);
     }
@@ -56,26 +64,38 @@ export function ChurchToolsSettings() {
     }
   }
 
-  if (!state) return null;
-
   return (
     <div className="page">
       <div className="topbar">
         <h1>ChurchTools-Verbindung</h1>
       </div>
-      <div style={{ padding: '1.5rem', maxWidth: 480 }}>
+      {!state ? (
+        <div className="page-body">
+          {loadError ? (
+            <div role="alert">
+              <p className="error-text">{loadError}</p>
+              <button className="btn" onClick={load}>
+                Erneut versuchen
+              </button>
+            </div>
+          ) : (
+            <p className="hint">Lädt…</p>
+          )}
+        </div>
+      ) : (
+      <div className="page-body" style={{ maxWidth: 480 }}>
         <form onSubmit={handleSave} className="panel" style={{ padding: '1.25rem' }}>
           <div className="field">
             <label htmlFor="ct-url">ChurchTools-Adresse</label>
-            <input id="ct-url" type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://meinegemeinde.church.tools" required />
+            <input id="ct-url" type="text" value={baseUrl} onChange={(e) => { setBaseUrl(e.target.value); setMessage(null); setTestResult(null); }} placeholder="https://meinegemeinde.church.tools" required />
           </div>
           <div className="field">
             <label htmlFor="ct-user">Benutzername</label>
-            <input id="ct-user" type="text" value={username} onChange={(e) => setUsername(e.target.value)} required />
+            <input id="ct-user" type="text" value={username} onChange={(e) => { setUsername(e.target.value); setMessage(null); setTestResult(null); }} required />
           </div>
           <div className="field">
             <label htmlFor="ct-pass">Passwort {state.configured && <span className="hint">(leer lassen, um das gespeicherte zu behalten; bei neuer Adresse erneut eingeben)</span>}</label>
-            <input id="ct-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={state.configured ? '••••••••' : ''} />
+            <input id="ct-pass" type="password" value={password} onChange={(e) => { setPassword(e.target.value); setMessage(null); setTestResult(null); }} placeholder={state.configured ? '••••••••' : ''} />
           </div>
 
           {state.configured && (
@@ -84,10 +104,18 @@ export function ChurchToolsSettings() {
             </p>
           )}
 
-          {message && <p className="hint">{message}</p>}
-          {testResult && <p className={testResult.success ? 'hint' : 'error-text'}>{testResult.message}</p>}
+          {message && (
+            <p className={message.isError ? 'error-text' : 'success-text'} role="status">
+              {message.text}
+            </p>
+          )}
+          {testResult && (
+            <p className={testResult.success ? 'success-text' : 'error-text'} role="status">
+              {testResult.message}
+            </p>
+          )}
 
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+          <div className="btn-row" style={{ marginTop: '0.5rem' }}>
             <button type="submit" className="btn btn-primary" disabled={saving}>
               {saving ? 'Speichert…' : 'Speichern'}
             </button>
@@ -97,6 +125,7 @@ export function ChurchToolsSettings() {
           </div>
         </form>
       </div>
+      )}
     </div>
   );
 }

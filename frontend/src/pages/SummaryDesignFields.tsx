@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import type { LogoEntry, SummaryDesign } from '../types.js';
+import { useFieldId } from '../components/useFieldId.js';
 
 /** Grenzen wie in backend/src/rendering/summaryDesign.ts. */
 const FONT_SIZE_MIN = 8;
@@ -12,6 +13,7 @@ const FOOTER_MAX_LENGTH = 200;
 
 /** Gestaltung der A4-Anwesenheitsliste (nur beim Ziel „A4-Drucker“). */
 export function SummaryDesignFields({ value, onChange }: { value: SummaryDesign; onChange(next: SummaryDesign): void }) {
+  const fid = useFieldId();
   const [logos, setLogos] = useState<LogoEntry[] | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
 
@@ -38,8 +40,8 @@ export function SummaryDesignFields({ value, onChange }: { value: SummaryDesign;
       <h2 style={{ fontSize: '0.9rem', margin: '0 0 0.75rem' }}>Gestaltung der A4-Liste</h2>
 
       <div className="field">
-        <label>Logo</label>
-        <select value={value.logoId ?? ''} onChange={(e) => update({ logoId: e.target.value ? Number(e.target.value) : null })}>
+        <label htmlFor={fid('f1')}>Logo</label>
+        <select id={fid('f1')} value={value.logoId ?? ''} onChange={(e) => update({ logoId: e.target.value ? Number(e.target.value) : null })}>
           <option value="">– kein Logo –</option>
           {unlistedLogoId !== null && (
             <option value={unlistedLogoId}>
@@ -61,9 +63,9 @@ export function SummaryDesignFields({ value, onChange }: { value: SummaryDesign;
 
       <div className="field-row">
         <div className="field">
-          <label>Schriftgrösse (pt)</label>
+          <label htmlFor={fid('f2')}>Schriftgrösse (pt)</label>
           {/* Ein geleertes Feld wird als NaN gehalten: Speichern verhindert der Browser, die Vorschau meldet den API-Fehler. */}
-          <input
+          <input id={fid('f2')}
             type="number"
             min={FONT_SIZE_MIN}
             max={FONT_SIZE_MAX}
@@ -74,16 +76,18 @@ export function SummaryDesignFields({ value, onChange }: { value: SummaryDesign;
           />
         </div>
         <div className="field">
-          <label>Ausrichtung</label>
-          <select value={value.orientation} onChange={(e) => update({ orientation: e.target.value as SummaryDesign['orientation'] })}>
+          <label htmlFor={fid('f3')}>Ausrichtung</label>
+          <select id={fid('f3')} value={value.orientation} onChange={(e) => update({ orientation: e.target.value as SummaryDesign['orientation'] })}>
             <option value="landscape">Querformat</option>
             <option value="portrait">Hochformat</option>
           </select>
         </div>
       </div>
 
-      <div className="field">
-        <label>Abhak-Spalten (höchstens {MAX_CHECK_COLUMNS})</label>
+      <div className="field" role="group" aria-labelledby={fid('checks')}>
+        <span className="field-label" id={fid('checks')}>
+          Abhak-Spalten (höchstens {MAX_CHECK_COLUMNS})
+        </span>
         {value.checkColumns.map((heading, index) => (
           <div key={index} style={{ display: 'flex', gap: '0.4rem' }}>
             <input
@@ -114,8 +118,8 @@ export function SummaryDesignFields({ value, onChange }: { value: SummaryDesign;
       </label>
       <div className="field-row">
         <div className="field">
-          <label>Überschrift der Gast-Spalte</label>
-          <input
+          <label htmlFor={fid('f4')}>Überschrift der Gast-Spalte</label>
+          <input id={fid('f4')}
             type="text"
             maxLength={GUEST_TEXT_MAX_LENGTH}
             disabled={!value.guestColumn.enabled}
@@ -124,8 +128,8 @@ export function SummaryDesignFields({ value, onChange }: { value: SummaryDesign;
           />
         </div>
         <div className="field">
-          <label>Erkennungswort für Gäste</label>
-          <input
+          <label htmlFor={fid('f5')}>Erkennungswort für Gäste</label>
+          <input id={fid('f5')}
             type="text"
             maxLength={GUEST_TEXT_MAX_LENGTH}
             required
@@ -141,8 +145,8 @@ export function SummaryDesignFields({ value, onChange }: { value: SummaryDesign;
       </p>
 
       <div className="field" style={{ marginBottom: 0 }}>
-        <label>Fusszeile</label>
-        <textarea rows={2} maxLength={FOOTER_MAX_LENGTH} value={value.footer} onChange={(e) => update({ footer: e.target.value })} />
+        <label htmlFor={fid('f6')}>Fusszeile</label>
+        <textarea id={fid('f6')} rows={2} maxLength={FOOTER_MAX_LENGTH} value={value.footer} onChange={(e) => update({ footer: e.target.value })} />
       </div>
     </div>
   );

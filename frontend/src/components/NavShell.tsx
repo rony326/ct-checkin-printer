@@ -1,52 +1,71 @@
 import { NavLink, Outlet } from 'react-router-dom';
 
-const NAV_ITEMS = [
-  { to: '/', label: 'Status', end: true },
-  { to: '/layouts', label: 'Etiketten-Layouts' },
-  { to: '/printers', label: 'Drucker' },
-  { to: '/churchtools', label: 'ChurchTools' },
-  { to: '/webhooks', label: 'Webhooks' },
-  { to: '/summary-layouts', label: 'Sammelausdrucke' },
-  { to: '/document-printers', label: 'Sammelausdruck-Drucker' },
-  { to: '/settings', label: 'Einstellungen' },
+interface NavItem {
+  to: string;
+  label: string;
+  end?: boolean;
+}
+
+/** Nach Aufgabe gruppiert: was zusammengehört, steht beieinander. */
+const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
+  { label: 'Übersicht', items: [{ to: '/', label: 'Status', end: true }] },
+  {
+    label: 'Etiketten',
+    items: [
+      { to: '/layouts', label: 'Etiketten-Layouts' },
+      { to: '/printers', label: 'Drucker' },
+    ],
+  },
+  {
+    label: 'Sammelausdruck',
+    items: [
+      { to: '/summary-layouts', label: 'Sammelausdrucke' },
+      { to: '/document-printers', label: 'A4-Drucker' },
+    ],
+  },
+  {
+    label: 'Verbindungen',
+    items: [
+      { to: '/churchtools', label: 'ChurchTools' },
+      { to: '/webhooks', label: 'Webhooks' },
+    ],
+  },
+  { label: 'System', items: [{ to: '/settings', label: 'Einstellungen' }] },
 ];
 
-export function NavShell() {
+export function NavShell({ onLoggedOut }: { onLoggedOut: () => void }) {
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
+    onLoggedOut();
+  }
+
   return (
-    <div style={{ display: 'flex', minHeight: '100%' }}>
-      <nav
-        style={{
-          width: 200,
-          flexShrink: 0,
-          borderRight: '1px solid var(--line)',
-          background: 'var(--surface)',
-          padding: '1.25rem 0.75rem',
-        }}
-      >
-        <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: '1.25rem', padding: '0 0.5rem' }}>ct-checkin-printer</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-          {NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              style={({ isActive }) => ({
-                padding: '0.5rem 0.6rem',
-                borderRadius: 4,
-                fontSize: '0.85rem',
-                textDecoration: 'none',
-                color: isActive ? 'var(--accent-ink)' : 'var(--ink)',
-                background: isActive ? 'var(--accent)' : 'transparent',
-              })}
-            >
-              {item.label}
-            </NavLink>
+    <div className="shell">
+      <nav className="nav" aria-label="Hauptnavigation">
+        <div className="nav-brand">ct-checkin-printer</div>
+        <div className="nav-groups">
+          {NAV_GROUPS.map((group) => (
+            <div className="nav-group" key={group.label} role="group" aria-label={group.label}>
+              <div className="nav-group-label" aria-hidden="true">
+                {group.label}
+              </div>
+              {group.items.map((item) => (
+                <NavLink key={item.to} to={item.to} end={item.end} className="nav-link">
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </div>
+        <div className="nav-footer">
+          <button type="button" className="nav-logout" onClick={handleLogout}>
+            Abmelden
+          </button>
+        </div>
       </nav>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <main className="shell-main">
         <Outlet />
-      </div>
+      </main>
     </div>
   );
 }

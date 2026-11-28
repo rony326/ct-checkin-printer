@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import type { LabelLayout, PrinterGroup, Vendor } from '../types.js';
+import { useFieldId } from '../components/useFieldId.js';
 
 type Mode = 'single' | 'router';
 
@@ -15,6 +16,7 @@ interface LegForm {
 const EMPTY_LEG: LegForm = { name: '', vendor: 'brother-ql', host: '', layoutId: '' };
 
 export function PrinterCreate() {
+  const fid = useFieldId();
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode | null>(null);
   const [name, setName] = useState('');
@@ -64,14 +66,14 @@ export function PrinterCreate() {
         <div className="topbar">
           <h1>Neuer Drucker</h1>
         </div>
-        <div style={{ padding: '1.5rem', display: 'flex', gap: '1rem', maxWidth: 720 }}>
-          <button type="button" className="panel" style={{ flex: 1, padding: '1.5rem', textAlign: 'left', cursor: 'pointer' }} onClick={() => chooseMode('single')}>
+        <div className="page-body choice-grid" style={{ maxWidth: 720 }}>
+          <button type="button" className="choice-card" onClick={() => chooseMode('single')}>
             <strong>Einzel-Drucker</strong>
             <p className="hint" style={{ marginBottom: 0 }}>
               Ein ChurchTools-Ort, ein physisches Gerät.
             </p>
           </button>
-          <button type="button" className="panel" style={{ flex: 1, padding: '1.5rem', textAlign: 'left', cursor: 'pointer' }} onClick={() => chooseMode('router')}>
+          <button type="button" className="choice-card" onClick={() => chooseMode('router')}>
             <strong>Router-Drucker</strong>
             <p className="hint" style={{ marginBottom: 0 }}>
               Ein ChurchTools-Ort, mehrere physische Geräte — je Etikettentyp ein eigenes Gerät.
@@ -85,21 +87,21 @@ export function PrinterCreate() {
   return (
     <div className="page">
       <div className="topbar">
-        <button type="button" className="topbar-back" onClick={() => setMode(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit' }}>
+        <button type="button" className="topbar-back" onClick={() => setMode(null)}>
           ← Zurück
         </button>
         <h1>{mode === 'single' ? 'Einzel-Drucker anlegen' : 'Router-Drucker anlegen'}</h1>
       </div>
-      <form onSubmit={handleSubmit} style={{ padding: '1.5rem', maxWidth: 720 }}>
+      <form onSubmit={handleSubmit} className="page-body" style={{ maxWidth: 720 }}>
         <div className="panel" style={{ padding: '1.25rem', marginBottom: '1.5rem' }}>
           <div className="field-row">
             <div className="field">
-              <label>Name (Anzeigename)</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="z.B. Minis" required autoFocus />
+              <label htmlFor={fid('f1')}>Name (Anzeigename)</label>
+              <input id={fid('f1')} type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="z.B. Minis" required autoFocus />
             </div>
             <div className="field">
-              <label>Hostname (technisch, in ChurchTools sichtbar)</label>
-              <input type="text" value={hostname} onChange={(e) => setHostname(e.target.value)} placeholder="z.B. B2" required />
+              <label htmlFor={fid('f2')}>Hostname (technisch, in ChurchTools sichtbar)</label>
+              <input id={fid('f2')} type="text" value={hostname} onChange={(e) => setHostname(e.target.value)} placeholder="z.B. B2" required />
             </div>
           </div>
         </div>
@@ -108,20 +110,20 @@ export function PrinterCreate() {
           <div className="panel" style={{ padding: '1.25rem', marginBottom: '1.5rem' }}>
             <div className="field-row">
               <div className="field">
-                <label>Druckertyp</label>
-                <select value={legs[0]!.vendor} onChange={(e) => updateLeg(0, { vendor: e.target.value as Vendor })}>
+                <label htmlFor={fid('f3')}>Druckertyp</label>
+                <select id={fid('f3')} value={legs[0]!.vendor} onChange={(e) => updateLeg(0, { vendor: e.target.value as Vendor })}>
                   <option value="brother-ql">Brother QL</option>
                   <option value="zebra-zpl">Zebra (ZPL)</option>
                 </select>
               </div>
               <div className="field">
-                <label>Netzwerkadresse (IP)</label>
-                <input type="text" value={legs[0]!.host} onChange={(e) => updateLeg(0, { host: e.target.value })} placeholder="192.168.1.50" required />
+                <label htmlFor={fid('f4')}>Netzwerkadresse (IP)</label>
+                <input id={fid('f4')} type="text" value={legs[0]!.host} onChange={(e) => updateLeg(0, { host: e.target.value })} placeholder="192.168.1.50" required />
               </div>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label>Etiketten-Layout zuordnen (optional)</label>
-              <select value={legs[0]!.layoutId} onChange={(e) => updateLeg(0, { layoutId: e.target.value ? Number(e.target.value) : '' })}>
+              <label htmlFor={fid('f5')}>Etiketten-Layout zuordnen (optional)</label>
+              <select id={fid('f5')} value={legs[0]!.layoutId} onChange={(e) => updateLeg(0, { layoutId: e.target.value ? Number(e.target.value) : '' })}>
                 <option value="">Später zuordnen</option>
                 {unassignedLayouts.map((l) => (
                   <option key={l.id} value={l.id}>
@@ -145,24 +147,24 @@ export function PrinterCreate() {
                 </div>
                 <div className="field-row">
                   <div className="field">
-                    <label>Name</label>
-                    <input type="text" value={leg.name} onChange={(e) => updateLeg(i, { name: e.target.value })} placeholder="z.B. Kind" required />
+                    <label htmlFor={fid(`leg${i}-f6`)}>Name</label>
+                    <input id={fid(`leg${i}-f6`)} type="text" value={leg.name} onChange={(e) => updateLeg(i, { name: e.target.value })} placeholder="z.B. Kind" required />
                   </div>
                   <div className="field">
-                    <label>Druckertyp</label>
-                    <select value={leg.vendor} onChange={(e) => updateLeg(i, { vendor: e.target.value as Vendor })}>
+                    <label htmlFor={fid(`leg${i}-f7`)}>Druckertyp</label>
+                    <select id={fid(`leg${i}-f7`)} value={leg.vendor} onChange={(e) => updateLeg(i, { vendor: e.target.value as Vendor })}>
                       <option value="brother-ql">Brother QL</option>
                       <option value="zebra-zpl">Zebra (ZPL)</option>
                     </select>
                   </div>
                   <div className="field">
-                    <label>Netzwerkadresse (IP)</label>
-                    <input type="text" value={leg.host} onChange={(e) => updateLeg(i, { host: e.target.value })} placeholder="192.168.1.50" required />
+                    <label htmlFor={fid(`leg${i}-f8`)}>Netzwerkadresse (IP)</label>
+                    <input id={fid(`leg${i}-f8`)} type="text" value={leg.host} onChange={(e) => updateLeg(i, { host: e.target.value })} placeholder="192.168.1.50" required />
                   </div>
                 </div>
                 <div className="field" style={{ marginBottom: 0 }}>
-                  <label>Etiketten-Layout zuordnen (optional)</label>
-                  <select value={leg.layoutId} onChange={(e) => updateLeg(i, { layoutId: e.target.value ? Number(e.target.value) : '' })}>
+                  <label htmlFor={fid(`leg${i}-f9`)}>Etiketten-Layout zuordnen (optional)</label>
+                  <select id={fid(`leg${i}-f9`)} value={leg.layoutId} onChange={(e) => updateLeg(i, { layoutId: e.target.value ? Number(e.target.value) : '' })}>
                     <option value="">Später zuordnen</option>
                     {unassignedLayouts.map((l) => (
                       <option key={l.id} value={l.id}>

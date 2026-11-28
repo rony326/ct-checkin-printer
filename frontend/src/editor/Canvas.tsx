@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Group, Layer, Rect, Stage, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { Align, LabelElement, MediaType, Rotate, VariableDefs } from '../types.js';
@@ -6,7 +6,7 @@ import { VENDOR_DPI } from '../types.js';
 
 /** Reiner Bildschirm-Massstab fürs interaktive Editieren, unabhängig von der Druck-DPI. */
 export const SCREEN_PX_PER_MM = 4;
-const DEFAULT_CONTINUOUS_HEIGHT_MM = 120;
+export const DEFAULT_CONTINUOUS_HEIGHT_MM = 120;
 /** Grobe Zeilenhöhe für die Klick-Trefferzone von Text — Konvas eigene Text-Metrik ist hier nicht nötig, siehe `computeBoxes`. */
 const TEXT_LINE_HEIGHT_FACTOR = 1.2;
 
@@ -142,7 +142,7 @@ interface Props {
   onMove: (id: string, xMm: number, yMm: number) => void;
 }
 
-export function Canvas({ media, elements, selectedId, variables, fontNameById, onSelect, onMove }: Props) {
+export function Canvas({ media, elements, selectedId, variables, fontNameById, onSelect, onMove: onMoveElement }: Props) {
   const dpi = media ? VENDOR_DPI[media.vendor] : 300;
   const widthMm = media?.widthMm ?? 60;
   const heightMm = media?.heightMm ?? DEFAULT_CONTINUOUS_HEIGHT_MM;
@@ -156,56 +156,81 @@ export function Canvas({ media, elements, selectedId, variables, fontNameById, o
   const boxes = useMemo(() => computeBoxes(elements, widthPx, dpi), [elements, widthPx, dpi]);
 
   const stageRef = useRef<Konva.Stage | null>(null);
-  const dragRef = useRef<{ id: string; offsetXPx: number; offsetYPx: number } | null>(null);
-  // Live-Position während des Ziehens, unquantisiert für flüssiges Gefühl — erst beim Loslassen auf ganze mm gerundet (siehe handlePointerUp).
+  // Live-Position während des Ziehens, unquantisiert für flüssiges Gefühl — erst beim Loslassen auf ganze mm gerundet (siehe finishDrag).
   const [dragPreview, setDragPreview] = useState<{ id: string; xPx: number; yPx: number } | null>(null);
+  const previewRef = useRef<{ id: string; xPx: number; yPx: number } | null>(null);
+  const detachRef = useRef<(() => void) | null>(null);
 
+  useEffect(() => () => detachRef.current?.(), []);
+
+  function setCursor(cursor: string) {
+    const container = stageRef.current?.container();
+    if (container) container.style.cursor = cursor;
+  }
+
+  /**
+   * Nach dem Greifen wird der Zeiger auf `window` verfolgt (wie Pointer-Capture):
+   * Das Element bleibt am Finger bzw. an der Maus, auch wenn sie kurz über den
+   * Etikettenrand hinausfährt — vorher brach der Drag dort einfach ab.
+   */
   function handlePointerDown() {
     const stage = stageRef.current;
     const pos = stage?.getPointerPosition();
     if (!stage || !pos) return;
     const hit = pickElementAt(boxes, pos.x, pos.y);
     onSelect(hit?.id ?? null);
-    if (hit) {
-      dragRef.current = { id: hit.id, offsetXPx: pos.x - mmToScreenPx(hit.xMm), offsetYPx: pos.y - mmToScreenPx(hit.yMm) };
-    }
+    if (!hit) return;
+
+    // Greif-Versatz merken, damit das Element nicht zum Zeiger springt.
+    const offsetXPx = pos.x - mmToScreenPx(hit.xMm);
+    const offsetYPx = pos.y - mmToScreenPx(hit.yMm);
+    const id = hit.id;
+    setCursor('grabbing');
+
+    const onMove = (event: PointerEvent) => {
+      const rect = stage.container().getBoundingClientRect();
+      const xPx = Math.min(Math.max(0, event.clientX - rect.left - offsetXPx), widthPx);
+      const yPx = Math.min(Math.max(0, event.clientY - rect.top - offsetYPx), heightPx);
+      previewRef.current = { id, xPx, yPx };
+      setDragPreview(previewRef.current);
+    };
+    const finishDrag = () => {
+      detach();
+      const preview = previewRef.current;
+      previewRef.current = null;
+      setDragPreview(null);
+      setCursor('grab');
+      if (preview) onMoveElement(preview.id, screenPxToMm(preview.xPx), screenPxToMm(preview.yPx));
+    };
+    const detach = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', finishDrag);
+      window.removeEventListener('pointercancel', finishDrag);
+      detachRef.current = null;
+    };
+    detachRef.current?.();
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', finishDrag);
+    window.addEventListener('pointercancel', finishDrag);
+    detachRef.current = detach;
   }
 
-  function handlePointerMove() {
-    const drag = dragRef.current;
-    const stage = stageRef.current;
-    const pos = stage?.getPointerPosition();
-    if (!drag || !pos) return;
-    const xPx = Math.min(Math.max(0, pos.x - drag.offsetXPx), widthPx);
-    const yPx = Math.min(Math.max(0, pos.y - drag.offsetYPx), heightPx);
-    setDragPreview({ id: drag.id, xPx, yPx });
-  }
-
-  function handlePointerUp() {
-    const drag = dragRef.current;
-    dragRef.current = null;
-    if (!drag) return;
-    setDragPreview((preview) => {
-      if (preview && preview.id === drag.id) {
-        onMove(drag.id, screenPxToMm(preview.xPx), screenPxToMm(preview.yPx));
-      }
-      return null;
-    });
+  /** Cursor zeigt schon vor dem Klick, was greifbar ist. */
+  function handleHover() {
+    if (detachRef.current) return;
+    const pos = stageRef.current?.getPointerPosition();
+    if (!pos) return;
+    setCursor(pickElementAt(boxes, pos.x, pos.y) ? 'grab' : 'default');
   }
 
   return (
-    <div style={{ display: 'inline-block', boxShadow: '0 4px 16px rgba(28,27,25,0.14)' }}>
+    <div className="paper">
       <Stage
         ref={stageRef}
         width={widthPx}
         height={heightPx}
-        onMouseDown={handlePointerDown}
-        onMouseMove={handlePointerMove}
-        onMouseUp={handlePointerUp}
-        onMouseLeave={handlePointerUp}
-        onTouchStart={handlePointerDown}
-        onTouchMove={handlePointerMove}
-        onTouchEnd={handlePointerUp}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handleHover}
       >
         <Layer listening={false}>
           <Rect x={0} y={0} width={widthPx} height={heightPx} fill="white" stroke="#e4e1da" />
@@ -216,7 +241,8 @@ export function Canvas({ media, elements, selectedId, variables, fontNameById, o
             const x = isDragging ? dragPreview.xPx : mmToScreenPx(el.xMm);
             const y = isDragging ? dragPreview.yPx : mmToScreenPx(el.yMm);
 
-            const groupProps = { x, y, rotation: Number(el.rotate ?? '0') };
+            // Leicht transparent, solange es „in der Hand" liegt.
+            const groupProps = { x, y, rotation: Number(el.rotate ?? '0'), opacity: isDragging ? 0.75 : 1 };
 
             if (el.type === 'text' || el.type === 'static') {
               const box = textBoxProps(el.align, widthPx);

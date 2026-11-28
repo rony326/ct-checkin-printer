@@ -1,16 +1,88 @@
 :root {
+  color-scheme: light dark;
+
   --bg: #faf9f7;
   --surface: #ffffff;
+  --surface-sunken: #f2f1ec;
   --ink: #1c1b19;
   --muted: #6b6862;
   --line: #e4e1da;
+  --line-strong: #c9c5ba;
   --accent: #2b6e63;
   --accent-hover: #235a51;
   --accent-ink: #ffffff;
+  --accent-soft: #e3efec;
+  --success: #2b6e63;
+  --warning: #a8661a;
   --danger: #b23a34;
   --danger-bg: #fbebea;
+
+  /* Material: halbtransparente Leiste, Inhalt scrollt darunter durch. */
+  --chrome: rgba(255, 255, 255, 0.78);
+  --chrome-blur: blur(20px) saturate(180%);
+
+  --shadow-paper: 0 1px 2px rgba(28, 27, 25, 0.08), 0 6px 20px rgba(28, 27, 25, 0.12);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+
+  /* Kurz und ohne Überschwingen: Bedienelemente sollen reagieren, nicht tanzen. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-press: 90ms;
+  --dur-ui: 160ms;
+
   --font-ui: 'Work Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/* Dunkle Variante — das Etikett im Editor bleibt bewusst weiss, es steht für Papier. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161614;
+    --surface: #1f1f1c;
+    --surface-sunken: #2a2a26;
+    --ink: #ecebe7;
+    --muted: #a19e96;
+    --line: #34332f;
+    --line-strong: #4a4943;
+    --accent: #4fa597;
+    --accent-hover: #63b6a8;
+    --accent-ink: #0f1a18;
+    --accent-soft: #1d332f;
+    --success: #5fb8a9;
+    --warning: #e0a35a;
+    --danger: #e8756e;
+    --danger-bg: #3a2120;
+    --chrome: rgba(31, 31, 28, 0.78);
+    --shadow-paper: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --chrome: var(--surface);
+    --chrome-blur: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --muted: var(--ink);
+    --line: var(--line-strong);
+    --chrome: var(--surface);
+    --chrome-blur: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+  :root {
+    --press-scale: 1;
+  }
 }
 
 * {
@@ -28,9 +100,17 @@ body {
   font-family: var(--font-ui);
   color: var(--ink);
   background: var(--bg);
-  font-size: 14px;
+  /* rem statt px: respektiert die Schriftgrösse, die im Browser eingestellt ist. */
+  font-size: 0.875rem;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1,
+h2 {
+  letter-spacing: -0.01em;
+  line-height: 1.25;
 }
 
 button,
@@ -44,6 +124,7 @@ textarea {
 
 button {
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 a {

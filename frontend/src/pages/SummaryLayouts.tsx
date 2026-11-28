@@ -3,6 +3,7 @@ import { api, postForBlob } from '../api/client.js';
 import { DEFAULT_SUMMARY_DESIGN } from '../types.js';
 import type { DocumentPrinter, PrinterGroup, SummaryColumn, SummaryDesign, SummaryLayout, SummaryResult, SummaryTrigger } from '../types.js';
 import { SummaryDesignFields } from './SummaryDesignFields.js';
+import { useFieldId } from '../components/useFieldId.js';
 
 const COLUMN_LABELS: Record<SummaryColumn, string> = { name: 'Name', code: 'Code', checkinTime: 'Zeit' };
 const TRIGGER_LABELS: Record<SummaryTrigger, string> = {
@@ -124,6 +125,7 @@ function TriggerSection({ layout, onChanged }: { layout: SummaryLayout; onChange
 }
 
 export function SummaryLayouts() {
+  const fid = useFieldId();
   const [layouts, setLayouts] = useState<SummaryLayout[] | null>(null);
   const [documentPrinters, setDocumentPrinters] = useState<DocumentPrinter[]>([]);
   const [legs, setLegs] = useState<LegOption[]>([]);
@@ -145,7 +147,7 @@ export function SummaryLayouts() {
   const [formError, setFormError] = useState<string | null>(null);
 
   const [printing, setPrinting] = useState<number | null>(null);
-  const [results, setResults] = useState<Record<number, { text: string; isError: boolean }>>({});
+  const [results, setResults] = useState<Record<number, { text: string; isError: boolean; pending?: boolean }>>({});
 
   async function load() {
     try {
@@ -277,7 +279,7 @@ export function SummaryLayouts() {
   }
 
   async function handleDelete(layout: SummaryLayout) {
-    if (!confirm(`Sammelausdruck „${layout.name}" wirklich löschen?`)) return;
+    if (!confirm(`Sammelausdruck „${layout.name}" wirklich löschen? Ein zugehöriger Hardware-Taster funktioniert danach nicht mehr.`)) return;
     try {
       await api.delete(`/api/summary-layouts/${layout.id}`);
       if (editingId === layout.id) resetForm();
@@ -289,7 +291,7 @@ export function SummaryLayouts() {
 
   async function handlePrint(layout: SummaryLayout) {
     setPrinting(layout.id);
-    setResults((prev) => ({ ...prev, [layout.id]: { text: 'Druckt…', isError: false } }));
+    setResults((prev) => ({ ...prev, [layout.id]: { text: 'Druckt…', isError: false, pending: true } }));
     try {
       const r = await api.post<SummaryResult>(`/api/summary-layouts/${layout.id}/print`);
       const entry = r.empty
@@ -326,18 +328,20 @@ export function SummaryLayouts() {
           {formOpen && editingId === null ? 'Abbrechen' : 'Neuer Sammelausdruck'}
         </button>
       </div>
-      <div style={{ padding: '1.5rem', maxWidth: 720 }}>
+      <div className="page-body" style={{ maxWidth: 720 }}>
         <p className="hint">Anwesenheitsliste pro Gruppe, gedruckt per Knopfdruck, per Hardware-Taster oder automatisch bei Fensterende.</p>
 
         {formOpen && (
           <form onSubmit={handleSubmit} className="panel" style={{ padding: '1.25rem', marginBottom: '1.5rem' }}>
             <div className="field">
-              <label>Name</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+              <label htmlFor={fid('f1')}>Name</label>
+              <input id={fid('f1')} type="text" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
             </div>
 
-            <div className="field">
-              <label>Ziel</label>
+            <div className="field" role="group" aria-labelledby={fid('target')}>
+              <span className="field-label" id={fid('target')}>
+                Ziel
+              </span>
               <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.4rem' }}>
                 <label style={{ fontSize: '0.85rem' }}>
                   <input type="radio" name="target" checked={targetKind === 'document'} onChange={() => setTargetKind('document')} /> A4-Drucker
@@ -347,7 +351,7 @@ export function SummaryLayouts() {
                 </label>
               </div>
               {targetKind === 'document' ? (
-                <select value={documentPrinterId ?? ''} onChange={(e) => setDocumentPrinterId(e.target.value ? Number(e.target.value) : null)}>
+                <select aria-label="A4-Drucker" value={documentPrinterId ?? ''} onChange={(e) => setDocumentPrinterId(e.target.value ? Number(e.target.value) : null)}>
                   <option value="">– Drucker wählen –</option>
                   {documentPrinters.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -356,7 +360,7 @@ export function SummaryLayouts() {
                   ))}
                 </select>
               ) : (
-                <select value={legId ?? ''} onChange={(e) => setLegId(e.target.value ? Number(e.target.value) : null)}>
+                <select aria-label="Etikettendrucker" value={legId ?? ''} onChange={(e) => setLegId(e.target.value ? Number(e.target.value) : null)}>
                   <option value="">– Drucker wählen –</option>
                   {legs.map((l) => (
                     <option key={l.id} value={l.id}>
@@ -367,8 +371,10 @@ export function SummaryLayouts() {
               )}
             </div>
 
-            <div className="field">
-              <label>Spalten</label>
+            <div className="field" role="group" aria-labelledby={fid('columns')}>
+              <span className="field-label" id={fid('columns')}>
+                Spalten
+              </span>
               <div style={{ display: 'flex', flexDirection: targetKind === 'document' ? 'column' : 'row', gap: targetKind === 'document' ? '0.4rem' : '1rem' }}>
                 {orderedColumns.map((col) => (
                   <div key={col} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
@@ -391,16 +397,16 @@ export function SummaryLayouts() {
             </div>
 
             <div className="field">
-              <label>Titel</label>
-              <input type="text" value={titleTemplate} onChange={(e) => setTitleTemplate(e.target.value)} required />
+              <label htmlFor={fid('f2')}>Titel</label>
+              <input id={fid('f2')} type="text" value={titleTemplate} onChange={(e) => setTitleTemplate(e.target.value)} required />
               <p className="hint" style={{ margin: '0.25rem 0 0' }}>
                 „{'{{checkin.group}}'}" wird durch den Gruppennamen ersetzt.
               </p>
             </div>
 
             <div className="field">
-              <label>Auslöser</label>
-              <select value={trigger} onChange={(e) => setTrigger(e.target.value as SummaryTrigger)}>
+              <label htmlFor={fid('f3')}>Auslöser</label>
+              <select id={fid('f3')} value={trigger} onChange={(e) => setTrigger(e.target.value as SummaryTrigger)}>
                 {(Object.keys(TRIGGER_LABELS) as SummaryTrigger[]).map((t) => (
                   <option key={t} value={t}>
                     {TRIGGER_LABELS[t]}
@@ -412,7 +418,7 @@ export function SummaryLayouts() {
             {targetKind === 'document' && <SummaryDesignFields value={design} onChange={setDesign} />}
 
             {formError && <p className="error-text">{formError}</p>}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div className="btn-row">
               <button type="submit" className="btn btn-primary">
                 {editingId === null ? 'Anlegen' : 'Speichern'}
               </button>
@@ -438,41 +444,47 @@ export function SummaryLayouts() {
         ) : layouts.length === 0 ? (
           <p className="hint">Noch kein Sammelausdruck angelegt.</p>
         ) : (
-          <table className="list">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Ziel</th>
-                <th>Auslöser</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {layouts.map((l) => (
-                <tr key={l.id}>
-                  <td>
-                    {l.name}
-                    {results[l.id] && <div className={results[l.id]!.isError ? 'error-text' : 'hint'}>{results[l.id]!.text}</div>}
-                  </td>
-                  <td>{targetLabel(l)}</td>
-                  <td>{TRIGGER_LABELS[l.trigger]}</td>
-                  <td>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                      <button className="btn" disabled={printing === l.id} onClick={() => handlePrint(l)}>
-                        Jetzt drucken (heute)
-                      </button>
-                      <button className="btn" onClick={() => startEdit(l)}>
-                        Bearbeiten
-                      </button>
-                      <button className="btn btn-danger" onClick={() => handleDelete(l)}>
-                        Löschen
-                      </button>
-                    </div>
-                  </td>
+          <div className="table-scroll">
+            <table className="list">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Ziel</th>
+                  <th>Auslöser</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {layouts.map((l) => (
+                  <tr key={l.id}>
+                    <td>
+                      {l.name}
+                      {results[l.id] && (
+                      <div className={results[l.id]!.isError ? 'error-text' : results[l.id]!.pending ? 'hint' : 'success-text'} role="status">
+                        {results[l.id]!.text}
+                      </div>
+                    )}
+                    </td>
+                    <td>{targetLabel(l)}</td>
+                    <td>{TRIGGER_LABELS[l.trigger]}</td>
+                    <td>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                        <button className="btn" disabled={printing === l.id} onClick={() => handlePrint(l)}>
+                          Jetzt drucken (heute)
+                        </button>
+                        <button className="btn" onClick={() => startEdit(l)}>
+                          Bearbeiten
+                        </button>
+                        <button className="btn btn-danger" onClick={() => handleDelete(l)}>
+                          Löschen
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

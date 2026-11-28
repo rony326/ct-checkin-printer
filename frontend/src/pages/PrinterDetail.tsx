@@ -2,14 +2,17 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import type { ActiveTimesMode, LabelLayout, LabelLayoutWithAlso, MediaType, PrinterGroupDetail, PrinterLegWithRoutes, Vendor } from '../types.js';
+import { useFieldId } from '../components/useFieldId.js';
 
 export function PrinterDetail() {
+  const fid = useFieldId();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [group, setGroup] = useState<PrinterGroupDetail | null>(null);
   const [mediaTypes, setMediaTypes] = useState<MediaType[]>([]);
   const [allLayouts, setAllLayouts] = useState<LabelLayout[]>([]);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   async function load() {
@@ -22,8 +25,9 @@ export function PrinterDetail() {
       setGroup(groupRes);
       setMediaTypes(mediaRes);
       setAllLayouts(layoutsRes);
+      setLoadError(null);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Laden fehlgeschlagen');
+      setLoadError(err instanceof Error ? err.message : 'Laden fehlgeschlagen');
     }
   }
 
@@ -31,7 +35,13 @@ export function PrinterDetail() {
     load();
   }, [id]);
 
+  function fail(err: unknown, fallback: string) {
+    setMessage({ text: err instanceof Error ? err.message : fallback, isError: true });
+  }
+
   function updateGroupField<K extends keyof PrinterGroupDetail>(key: K, value: PrinterGroupDetail[K]) {
+    // Ein altes „Gespeichert." darf nach einer neuen Änderung nicht stehen bleiben.
+    setMessage(null);
     setGroup((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
@@ -49,20 +59,24 @@ export function PrinterDetail() {
         activeTimesMode: group.activeTimesMode,
         activeTimesExpr: group.activeTimesExpr ?? undefined,
       });
-      setMessage('Gespeichert.');
+      setMessage({ text: 'Gespeichert.', isError: false });
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Speichern fehlgeschlagen');
+      fail(err, 'Speichern fehlgeschlagen');
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDeleteGroup() {
+    if (!group) return;
+    const legCount = group.legs.length;
+    const detail = legCount > 1 ? ` samt ${legCount} Geräten` : '';
+    if (!window.confirm(`Druckergruppe „${group.name}"${detail} wirklich löschen? Zugeordnete Layouts bleiben erhalten, sind danach aber keinem Drucker mehr zugeordnet.`)) return;
     try {
       await api.delete(`/api/printer-groups/${id}`);
       navigate('/printers');
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Löschen fehlgeschlagen');
+      fail(err, 'Löschen fehlgeschlagen');
     }
   }
 
@@ -71,16 +85,18 @@ export function PrinterDetail() {
       await api.put(`/api/printers/${legId}`, patch);
       await load();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Gerät konnte nicht aktualisiert werden');
+      fail(err, 'Gerät konnte nicht aktualisiert werden');
     }
   }
 
-  async function removeLeg(legId: number) {
+  async function removeLeg(leg: PrinterLegWithRoutes) {
+    if (!window.confirm(`Gerät „${leg.name}" wirklich entfernen?`)) return;
+    const legId = leg.id;
     try {
       await api.delete(`/api/printers/${legId}`);
       await load();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Gerät konnte nicht entfernt werden');
+      fail(err, 'Gerät konnte nicht entfernt werden');
     }
   }
 
@@ -89,7 +105,7 @@ export function PrinterDetail() {
       await api.post(`/api/printer-groups/${id}/legs`, { name: 'Neues Gerät', vendor: 'brother-ql', host: '0.0.0.0' });
       await load();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Gerät konnte nicht hinzugefügt werden');
+      fail(err, 'Gerät konnte nicht hinzugefügt werden');
     }
   }
 
@@ -98,7 +114,7 @@ export function PrinterDetail() {
       await api.put(`/api/label-layouts/${layoutId}`, { printerId: legId });
       await load();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Layout konnte nicht zugeordnet werden');
+      fail(err, 'Layout konnte nicht zugeordnet werden');
     }
   }
 
@@ -107,7 +123,7 @@ export function PrinterDetail() {
       await api.put(`/api/label-layouts/${layoutId}`, { printerId: null });
       await load();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Zuordnung konnte nicht aufgehoben werden');
+      fail(err, 'Zuordnung konnte nicht aufgehoben werden');
     }
   }
 
@@ -117,11 +133,34 @@ export function PrinterDetail() {
       await api.put(`/api/label-layouts/${layout.id}`, { alsoLayoutIds: next });
       await load();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Änderung konnte nicht gespeichert werden');
+      fail(err, 'Änderung konnte nicht gespeichert werden');
     }
   }
 
-  if (!group) return null;
+  if (!group) {
+    return (
+      <div className="page">
+        <div className="topbar">
+          <Link to="/printers" className="topbar-back">
+            ← Drucker
+          </Link>
+          <h1>Drucker</h1>
+        </div>
+        <div className="page-body">
+          {loadError ? (
+            <div role="alert">
+              <p className="error-text">{loadError}</p>
+              <button className="btn" onClick={load}>
+                Erneut versuchen
+              </button>
+            </div>
+          ) : (
+            <p className="hint">Lädt…</p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const unassignedLayouts = allLayouts.filter((l) => l.printerId === null);
 
@@ -132,23 +171,27 @@ export function PrinterDetail() {
           ← Drucker
         </Link>
         <h1>{group.name}</h1>
-        {message && <span className="hint">{message}</span>}
+        {message && (
+          <span className={message.isError ? 'error-text' : 'success-text'} role="status">
+            {message.text}
+          </span>
+        )}
         <button className="btn btn-primary" onClick={handleSaveGroup} disabled={saving}>
           {saving ? 'Speichert…' : 'Speichern'}
         </button>
       </div>
 
-      <div style={{ padding: '1.5rem', maxWidth: 780, display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div className="page-body" style={{ maxWidth: 780, display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         <section className="panel" style={{ padding: '1.25rem' }}>
           <p className="hint" style={{ marginTop: 0 }}>Gilt für alle Geräte dieser Druckergruppe.</p>
           <div className="field-row">
             <div className="field">
-              <label>Name (Anzeigename)</label>
-              <input type="text" value={group.name} onChange={(e) => updateGroupField('name', e.target.value)} />
+              <label htmlFor={fid('f1')}>Name (Anzeigename)</label>
+              <input id={fid('f1')} type="text" value={group.name} onChange={(e) => updateGroupField('name', e.target.value)} />
             </div>
             <div className="field">
-              <label>Hostname</label>
-              <input type="text" value={group.hostname} onChange={(e) => updateGroupField('hostname', e.target.value)} />
+              <label htmlFor={fid('f2')}>Hostname</label>
+              <input id={fid('f2')} type="text" value={group.hostname} onChange={(e) => updateGroupField('hostname', e.target.value)} />
             </div>
           </div>
 
@@ -162,8 +205,8 @@ export function PrinterDetail() {
           </div>
 
           <div className="field">
-            <label>Zeitfenster</label>
-            <select value={group.activeTimesMode} onChange={(e) => updateGroupField('activeTimesMode', e.target.value as ActiveTimesMode)}>
+            <label htmlFor={fid('f3')}>Zeitfenster</label>
+            <select id={fid('f3')} value={group.activeTimesMode} onChange={(e) => updateGroupField('activeTimesMode', e.target.value as ActiveTimesMode)}>
               <option value="inherit">Globales Zeitfenster übernehmen</option>
               <option value="always">Immer aktiv</option>
               <option value="custom">Eigenes Zeitfenster</option>
@@ -171,8 +214,8 @@ export function PrinterDetail() {
           </div>
           {group.activeTimesMode === 'custom' && (
             <div className="field" style={{ marginBottom: 0 }}>
-              <label>Zeitfenster-Ausdruck</label>
-              <input
+              <label htmlFor={fid('f4')}>Zeitfenster-Ausdruck</label>
+              <input id={fid('f4')}
                 type="text"
                 className="mono"
                 value={group.activeTimesExpr ?? ''}
@@ -195,7 +238,7 @@ export function PrinterDetail() {
               unassignedLayouts={unassignedLayouts}
               canRemove={group.legs.length > 1}
               onUpdate={(patch) => updateLeg(leg.id, patch)}
-              onRemove={() => removeLeg(leg.id)}
+              onRemove={() => removeLeg(leg)}
               onAssignLayout={(layoutId) => assignLayout(leg.id, layoutId)}
               onUnassignLayout={unassignLayout}
               onToggleAlso={toggleAlso}
@@ -228,6 +271,7 @@ interface LegCardProps {
 }
 
 function LegCard({ leg, mediaTypes, allLayouts, unassignedLayouts, canRemove, onUpdate, onRemove, onAssignLayout, onUnassignLayout, onToggleAlso }: LegCardProps) {
+  const fid = useFieldId();
   const [nameDraft, setNameDraft] = useState(leg.name);
   const [hostDraft, setHostDraft] = useState(leg.host);
   const [portDraft, setPortDraft] = useState(String(leg.port));
@@ -254,12 +298,12 @@ function LegCard({ leg, mediaTypes, allLayouts, unassignedLayouts, canRemove, on
       </div>
       <div className="field-row">
         <div className="field">
-          <label>Name</label>
-          <input type="text" value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} onBlur={() => onUpdate({ name: nameDraft })} />
+          <label htmlFor={fid('f1')}>Name</label>
+          <input id={fid('f1')} type="text" value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} onBlur={() => onUpdate({ name: nameDraft })} />
         </div>
         <div className="field">
-          <label>Hersteller</label>
-          <select value={leg.vendor} onChange={(e) => onUpdate({ vendor: e.target.value as Vendor })}>
+          <label htmlFor={fid('f2')}>Hersteller</label>
+          <select id={fid('f2')} value={leg.vendor} onChange={(e) => onUpdate({ vendor: e.target.value as Vendor })}>
             <option value="brother-ql">Brother QL</option>
             <option value="zebra-zpl">Zebra (ZPL)</option>
           </select>
@@ -267,17 +311,17 @@ function LegCard({ leg, mediaTypes, allLayouts, unassignedLayouts, canRemove, on
       </div>
       <div className="field-row">
         <div className="field">
-          <label>Netzwerkadresse (IP)</label>
-          <input type="text" value={hostDraft} onChange={(e) => setHostDraft(e.target.value)} onBlur={() => onUpdate({ host: hostDraft })} />
+          <label htmlFor={fid('f3')}>Netzwerkadresse (IP)</label>
+          <input id={fid('f3')} type="text" value={hostDraft} onChange={(e) => setHostDraft(e.target.value)} onBlur={() => onUpdate({ host: hostDraft })} />
         </div>
         <div className="field">
-          <label>Port</label>
-          <input type="number" value={portDraft} onChange={(e) => setPortDraft(e.target.value)} onBlur={() => onUpdate({ port: Number(portDraft) })} />
+          <label htmlFor={fid('f4')}>Port</label>
+          <input id={fid('f4')} type="number" value={portDraft} onChange={(e) => setPortDraft(e.target.value)} onBlur={() => onUpdate({ port: Number(portDraft) })} />
         </div>
       </div>
       <div className="field" style={{ marginBottom: '0.75rem' }}>
-        <label>Etikettengrösse (Standard, falls nicht automatisch erkannt)</label>
-        <select value={leg.mediaId ?? ''} onChange={(e) => onUpdate({ mediaId: e.target.value ? Number(e.target.value) : null })}>
+        <label htmlFor={fid('f5')}>Etikettengrösse (Standard, falls nicht automatisch erkannt)</label>
+        <select id={fid('f5')} value={leg.mediaId ?? ''} onChange={(e) => onUpdate({ mediaId: e.target.value ? Number(e.target.value) : null })}>
           <option value="">Automatisch erkennen</option>
           {mediaTypes
             .filter((m) => m.vendor === leg.vendor)
@@ -320,8 +364,8 @@ function LegCard({ leg, mediaTypes, allLayouts, unassignedLayouts, canRemove, on
 
       {unassignedLayouts.length > 0 && (
         <div className="field" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
-          <label>Bestehendes Layout zuordnen</label>
-          <select value="" onChange={(e) => e.target.value && onAssignLayout(Number(e.target.value))}>
+          <label htmlFor={fid('f6')}>Bestehendes Layout zuordnen</label>
+          <select id={fid('f6')} value="" onChange={(e) => e.target.value && onAssignLayout(Number(e.target.value))}>
             <option value="">Bitte wählen</option>
             {unassignedLayouts.map((l) => (
               <option key={l.id} value={l.id}>

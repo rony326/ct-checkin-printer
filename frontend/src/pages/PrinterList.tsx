@@ -31,33 +31,35 @@ export function PrinterList() {
         </button>
       </div>
 
-      <div style={{ padding: '1.5rem', maxWidth: 900 }}>
+      <div className="page-body" style={{ maxWidth: 900 }}>
         {error && <p className="error-text">{error}</p>}
         {groups === null ? (
           <p className="hint">Lädt…</p>
         ) : groups.length === 0 ? (
           <p className="hint">Noch keine Drucker angelegt.</p>
         ) : (
-          <table className="list">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Hostname</th>
-                <th>Typ</th>
-                <th>Geräte</th>
-              </tr>
-            </thead>
-            <tbody>
-              {groups.map((group) => (
-                <tr key={group.id} className="clickable" onClick={() => navigate(`/printers/${group.id}`)}>
-                  <td>{group.name}</td>
-                  <td className="mono">{group.hostname}</td>
-                  <td>{group.legs.length <= 1 ? 'Einzel' : `Router (${group.legs.length} Geräte)`}</td>
-                  <td className="hint">{group.legs.map((leg) => `${leg.name} (${leg.vendor === 'brother-ql' ? 'Brother' : 'Zebra'})`).join(', ')}</td>
+          <div className="table-scroll">
+            <table className="list">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Hostname</th>
+                  <th>Typ</th>
+                  <th>Geräte</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {groups.map((group) => (
+                  <tr key={group.id} className="clickable" onClick={() => navigate(`/printers/${group.id}`)}>
+                    <td>{group.name}</td>
+                    <td className="mono">{group.hostname}</td>
+                    <td>{group.legs.length <= 1 ? 'Einzel' : `Router (${group.legs.length} Geräte)`}</td>
+                    <td className="hint">{group.legs.map((leg) => `${leg.name} (${leg.vendor === 'brother-ql' ? 'Brother' : 'Zebra'})`).join(', ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

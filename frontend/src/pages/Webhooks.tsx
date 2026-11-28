@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import type { EventScope, WebhookIncoming, WebhookOutgoing } from '../types.js';
+import { useFieldId } from '../components/useFieldId.js';
 
 function OutgoingSection() {
+  const fid = useFieldId();
   const [webhooks, setWebhooks] = useState<WebhookOutgoing[] | null>(null);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
@@ -45,16 +47,22 @@ function OutgoingSection() {
     }
   }
 
-  async function handleDelete(id: number) {
-    await api.delete(`/api/webhooks/outgoing/${id}`);
-    await load();
+  async function handleDelete(webhook: WebhookOutgoing) {
+    if (!window.confirm(`Webhook „${webhook.name}" wirklich löschen?`)) return;
+    setError(null);
+    try {
+      await api.delete(`/api/webhooks/outgoing/${webhook.id}`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Löschen fehlgeschlagen');
+    }
   }
 
   return (
     <section className="panel" style={{ padding: '1.25rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
         <h2 style={{ fontSize: '0.9rem', margin: 0 }}>Ausgehende Webhooks</h2>
-        <button className="btn" onClick={() => setCreating((v) => !v)}>
+        <button className="btn" onClick={() => { setError(null); setCreating((v) => !v); }}>
           {creating ? 'Abbrechen' : '+ Neuer Webhook'}
         </button>
       </div>
@@ -64,22 +72,22 @@ function OutgoingSection() {
         <form onSubmit={handleCreate} style={{ marginBottom: '1rem', borderBottom: '1px solid var(--line)', paddingBottom: '1rem' }}>
           <div className="field-row">
             <div className="field">
-              <label>Name</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+              <label htmlFor={fid('f1')}>Name</label>
+              <input id={fid('f1')} type="text" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
             </div>
             <div className="field">
-              <label>Ziel-URL</label>
-              <input type="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://meinserver.ch/webhook" required />
+              <label htmlFor={fid('f2')}>Ziel-URL</label>
+              <input id={fid('f2')} type="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://meinserver.ch/webhook" required />
             </div>
           </div>
           <div className="field-row">
             <div className="field">
-              <label>Secret (optional, als Bearer-Token gesendet)</label>
-              <input type="text" value={secret} onChange={(e) => setSecret(e.target.value)} />
+              <label htmlFor={fid('f3')}>Secret (optional, als Bearer-Token gesendet)</label>
+              <input id={fid('f3')} type="text" value={secret} onChange={(e) => setSecret(e.target.value)} />
             </div>
             <div className="field">
-              <label>Ereignisse</label>
-              <select value={eventScope} onChange={(e) => setEventScope(e.target.value as EventScope)}>
+              <label htmlFor={fid('f4')}>Ereignisse</label>
+              <select id={fid('f4')} value={eventScope} onChange={(e) => setEventScope(e.target.value as EventScope)}>
                 <option value="both">Check-ins und Drucker-Status</option>
                 <option value="checkin">Nur Check-ins</option>
                 <option value="status">Nur Drucker-Status</option>
@@ -93,6 +101,7 @@ function OutgoingSection() {
         </form>
       )}
 
+      {!creating && error && <p className="error-text">{error}</p>}
       {webhooks === null ? (
         <p className="hint">Lädt…</p>
       ) : webhooks.length === 0 ? (
@@ -103,13 +112,17 @@ function OutgoingSection() {
             <li key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
               <div>
                 <strong>{w.name}</strong> <span className="mono hint">{w.url}</span>
-                {testResults[w.id] && <div className="hint">{testResults[w.id]}</div>}
+                {testResults[w.id] && (
+                  <div className="hint" role="status">
+                    {testResults[w.id]}
+                  </div>
+                )}
               </div>
               <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
                 <button className="btn" onClick={() => handleTest(w.id)}>
                   Test senden
                 </button>
-                <button className="btn btn-danger" onClick={() => handleDelete(w.id)}>
+                <button className="btn btn-danger" onClick={() => handleDelete(w)}>
                   Löschen
                 </button>
               </div>
@@ -145,6 +158,8 @@ function IncomingSection() {
   }
 
   async function handleDelete(id: number) {
+    // Der Pfad-Token ist danach für immer ungültig — externe Systeme müssen neu konfiguriert werden.
+    if (!window.confirm('Endpunkt wirklich löschen? Systeme, die ihn aufrufen, funktionieren danach nicht mehr.')) return;
     await api.delete(`/api/webhooks/incoming/${id}`);
     await load();
   }
@@ -193,8 +208,15 @@ function IncomingSection() {
                   <label style={{ fontSize: '0.8rem' }}>
                     <input type="checkbox" checked={w.enabled} onChange={(e) => handleToggle(w.id, e.target.checked)} /> Aktiv
                   </label>
-                  <button className="btn" onClick={() => handleReveal(w.id)}>
-                    Secret anzeigen
+                  <button
+                    className="btn"
+                    onClick={() =>
+                      revealedSecrets[w.id] !== undefined
+                        ? setRevealedSecrets(({ [w.id]: _hidden, ...rest }) => rest)
+                        : handleReveal(w.id)
+                    }
+                  >
+                    {revealedSecrets[w.id] !== undefined ? 'Secret verbergen' : 'Secret anzeigen'}
                   </button>
                   <button className="btn" onClick={() => handleTest(w.id)}>
                     Test senden
@@ -209,7 +231,11 @@ function IncomingSection() {
                   Secret: {revealedSecrets[w.id]} (als „Authorization: Bearer …" mitsenden)
                 </p>
               )}
-              {testResults[w.id] && <p className="hint" style={{ marginBottom: 0 }}>{testResults[w.id]}</p>}
+              {testResults[w.id] && (
+                <p className="hint" role="status" style={{ marginBottom: 0 }}>
+                  {testResults[w.id]}
+                </p>
+              )}
             </li>
           ))}
         </ul>
@@ -224,7 +250,7 @@ export function Webhooks() {
       <div className="topbar">
         <h1>Webhooks</h1>
       </div>
-      <div style={{ padding: '1.5rem', maxWidth: 720, display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div className="page-body" style={{ maxWidth: 720, display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         <OutgoingSection />
         <IncomingSection />
       </div>

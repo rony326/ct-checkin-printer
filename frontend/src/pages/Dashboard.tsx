@@ -14,7 +14,7 @@ const MODE_LABEL: Record<PollerMode, string> = {
 const MODE_COLOR: Record<PollerMode, string> = {
   sleeping: 'var(--muted)',
   idle: 'var(--accent)',
-  active: '#c07a1f',
+  active: 'var(--warning)',
 };
 
 function formatLastJobAt(ms: number | null): string {
@@ -47,7 +47,7 @@ export function Dashboard() {
       <div className="topbar">
         <h1>Status</h1>
       </div>
-      <div style={{ padding: '1.5rem', maxWidth: 900 }}>
+      <div className="page-body" style={{ maxWidth: 900 }}>
         {error && <p className="error-text">{error}</p>}
         {pollers === null ? (
           <p className="hint">Lädt…</p>
@@ -57,33 +57,38 @@ export function Dashboard() {
             <Link to="/printers">Drucker</Link> und <Link to="/churchtools">ChurchTools</Link>.
           </p>
         ) : (
-          <table className="list">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Hostname</th>
-                <th>Status</th>
-                <th>Fehler in Folge</th>
-                <th>Letzter Job</th>
-                <th>Warteschlange</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pollers.map((p) => (
-                <tr key={p.groupId}>
-                  <td>{p.name}</td>
-                  <td className="mono">{p.hostname}</td>
-                  <td>
-                    <span style={{ color: MODE_COLOR[p.mode], fontWeight: 500 }}>{MODE_LABEL[p.mode]}</span>
-                    {!p.running && <span className="hint"> (gestoppt)</span>}
-                  </td>
-                  <td>{p.consecutiveErrors > 0 ? <span className="error-text">{p.consecutiveErrors}</span> : '0'}</td>
-                  <td className="hint">{formatLastJobAt(p.lastJobAt)}</td>
-                  <td>{p.pendingQueueCount > 0 ? <span className="error-text">{p.pendingQueueCount} wartend</span> : '—'}</td>
+          <div className="table-scroll">
+            <table className="list">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Hostname</th>
+                  <th>Status</th>
+                  <th>Fehler in Folge</th>
+                  <th>Letzter Job</th>
+                  <th>Warteschlange</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {pollers.map((p) => (
+                  <tr key={p.groupId}>
+                    <td>{p.name}</td>
+                    <td className="mono">{p.hostname}</td>
+                    <td>
+                      <span style={{ color: MODE_COLOR[p.mode], fontWeight: 500, whiteSpace: 'nowrap' }}>
+                      <span className="status-dot" aria-hidden="true" />
+                      {MODE_LABEL[p.mode]}
+                    </span>
+                      {!p.running && <span className="hint"> (gestoppt)</span>}
+                    </td>
+                    <td>{p.consecutiveErrors > 0 ? <span className="error-text">{p.consecutiveErrors}</span> : '0'}</td>
+                    <td className="hint">{formatLastJobAt(p.lastJobAt)}</td>
+                    <td>{p.pendingQueueCount > 0 ? <span className="error-text">{p.pendingQueueCount} wartend</span> : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

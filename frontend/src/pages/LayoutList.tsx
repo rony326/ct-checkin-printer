@@ -40,7 +40,7 @@ export function LayoutList() {
 
   async function handleDelete(event: React.MouseEvent, layoutId: number) {
     event.stopPropagation();
-    if (!window.confirm('Dieses Etiketten-Layout wirklich löschen?')) return;
+    if (!window.confirm('Dieses Etiketten-Layout wirklich löschen? Das lässt sich nicht rückgängig machen.')) return;
     await api.delete(`/api/label-layouts/${layoutId}`);
     await load();
   }
@@ -59,7 +59,7 @@ export function LayoutList() {
         </button>
       </div>
 
-      <div style={{ padding: '1.5rem', maxWidth: 720, margin: '0 auto', width: '100%' }}>
+      <div className="page-body" style={{ maxWidth: 720 }}>
         {creating && (
           <form onSubmit={handleCreate} className="panel" style={{ padding: '1.25rem', marginBottom: '1.5rem' }}>
             <div className="field-row">
@@ -100,32 +100,34 @@ export function LayoutList() {
         ) : layouts.length === 0 ? (
           <p className="hint">Noch keine Etiketten-Layouts angelegt. Leg oben eins an, um loszulegen.</p>
         ) : (
-          <table className="list">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Etikettentyp</th>
-                <th>Grösse</th>
-                <th>Elemente</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {layouts.map((layout) => (
-                <tr key={layout.id} className="clickable" onClick={() => navigate(`/layouts/${layout.id}`)}>
-                  <td>{layout.name}</td>
-                  <td className="mono">{layout.ctTypeKey}</td>
-                  <td>{mediaName(layout.mediaId)}</td>
-                  <td>{layout.elementsJson.length}</td>
-                  <td>
-                    <button className="btn btn-danger" onClick={(e) => handleDelete(e, layout.id)}>
-                      Löschen
-                    </button>
-                  </td>
+          <div className="table-scroll">
+            <table className="list">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Etikettentyp</th>
+                  <th>Grösse</th>
+                  <th>Elemente</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {layouts.map((layout) => (
+                  <tr key={layout.id} className="clickable" onClick={() => navigate(`/layouts/${layout.id}`)}>
+                    <td>{layout.name}</td>
+                    <td className="mono">{layout.ctTypeKey}</td>
+                    <td>{mediaName(layout.mediaId)}</td>
+                    <td>{layout.elementsJson.length}</td>
+                    <td>
+                      <button className="btn btn-danger" onClick={(e) => handleDelete(e, layout.id)}>
+                        Löschen
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

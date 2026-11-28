@@ -2,6 +2,19 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import type { AppConfigValues } from '../types.js';
 
+/** Millisekunden lesbar machen — „300000" sagt wenig, „5 min" sofort etwas. */
+function humanizeMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  if (ms < 1000) return `${ms} ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${+s.toFixed(1)} s`;
+  const min = s / 60;
+  if (min < 60) return `${+min.toFixed(1)} min`;
+  const h = min / 60;
+  if (h < 48) return `${+h.toFixed(1)} h`;
+  return `${+(h / 24).toFixed(1)} Tage`;
+}
+
 const NUMERIC_FIELDS: Array<{ key: keyof Omit<AppConfigValues, 'activeTimesDefault'>; label: string; hint?: string }> = [
   { key: 'pollIdleMs', label: 'Poll-Intervall im Leerlauf (ms)' },
   { key: 'pollActiveMs', label: 'Poll-Intervall im aktiven Modus (ms)' },
@@ -20,8 +33,15 @@ export function AppConfigSettings() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   async function load() {
-    setConfig(await api.get<AppConfigValues>('/api/app-config'));
+    try {
+      setConfig(await api.get<AppConfigValues>('/api/app-config'));
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Laden fehlgeschlagen');
+    }
   }
 
   useEffect(() => {
@@ -29,6 +49,7 @@ export function AppConfigSettings() {
   }, []);
 
   function updateField<K extends keyof AppConfigValues>(key: K, value: AppConfigValues[K]) {
+    setMessage(null);
     setConfig((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
@@ -52,9 +73,21 @@ export function AppConfigSettings() {
   if (!config) {
     return (
       <div className="page">
-        <p className="hint" style={{ padding: '1.5rem' }}>
-          Lädt…
-        </p>
+        <div className="topbar">
+          <h1>Einstellungen</h1>
+        </div>
+        <div className="page-body">
+          {loadError ? (
+            <div role="alert">
+              <p className="error-text">{loadError}</p>
+              <button className="btn" onClick={load}>
+                Erneut versuchen
+              </button>
+            </div>
+          ) : (
+            <p className="hint">Lädt…</p>
+          )}
+        </div>
       </div>
     );
   }
@@ -63,12 +96,21 @@ export function AppConfigSettings() {
     <div className="page">
       <div className="topbar">
         <h1>Einstellungen</h1>
-        {message && <span className="hint">{message}</span>}
-        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+        {message && (
+          <span className="success-text" role="status">
+            {message}
+          </span>
+        )}
+        {error && (
+          <span className="error-text" role="alert">
+            {error}
+          </span>
+        )}
+        <button type="submit" form="app-config-form" className="btn btn-primary" disabled={saving}>
           {saving ? 'Speichert…' : 'Speichern'}
         </button>
       </div>
-      <form onSubmit={handleSave} style={{ padding: '1.5rem', maxWidth: 560 }}>
+      <form id="app-config-form" onSubmit={handleSave} className="page-body" style={{ maxWidth: 560 }}>
         <div className="panel" style={{ padding: '1.25rem', marginBottom: '1.5rem' }}>
           <p className="hint" style={{ marginTop: 0 }}>
             Globale Standardwerte für alle Drucker — fallen zurück auf v1-kompatible Defaults, wenn hier nichts eingetragen ist.
@@ -83,6 +125,7 @@ export function AppConfigSettings() {
                 value={config[f.key]}
                 onChange={(e) => updateField(f.key, Number(e.target.value))}
               />
+              {f.key.endsWith('Ms') && humanizeMs(config[f.key]) && <span className="hint num">= {humanizeMs(config[f.key])}</span>}
             </div>
           ))}
         </div>
@@ -102,7 +145,6 @@ export function AppConfigSettings() {
           </div>
         </div>
 
-        {error && <p className="error-text">{error}</p>}
       </form>
     </div>
   );
