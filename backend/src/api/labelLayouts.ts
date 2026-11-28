@@ -45,6 +45,9 @@ const labelElementSchema = z.discriminatedUnion('type', [
   z.object({ id: z.string(), type: z.literal('line'), xMm: z.number(), yMm: z.number(), widthMm: z.number().positive(), thicknessMm: z.number().positive(), rotate: rotateEnum.optional() }),
 ]);
 
+/** Feste Länge bei Endlosmedien; null = automatisch aus dem Inhalt. */
+const lengthMmSchema = z.number().positive().max(1000).nullable().optional();
+
 const createLayoutSchema = z.object({
   name: z.string().min(1),
   ctTypeKey: z.string().min(1),
@@ -53,13 +56,14 @@ const createLayoutSchema = z.object({
   elementsJson: z.array(labelElementSchema).optional(),
   copies: z.number().int().positive().optional(),
   rotate: rotateEnum.optional(),
+  lengthMm: lengthMmSchema,
   /** Weitere Layouts, die zusätzlich gedruckt werden, wenn dieses gedruckt wird (siehe v1 `also[]`). */
   alsoLayoutIds: z.array(z.number()).optional(),
 });
 
 const updateLayoutSchema = createLayoutSchema.partial();
 
-const previewSchema = z.object({ elements: z.array(labelElementSchema), mediaId: z.number() });
+const previewSchema = z.object({ elements: z.array(labelElementSchema), mediaId: z.number(), lengthMm: lengthMmSchema });
 
 export function toMediaDefinition(row: typeof mediaTypes.$inferSelect): MediaDefinition {
   return {
@@ -176,6 +180,7 @@ export async function registerLabelLayoutRoutes(app: FastifyInstance) {
       dpi: VENDOR_DPI[mediaRow.vendor],
       fonts: fontPaths,
       logos: logoBuffers,
+      lengthMm: parsed.data.lengthMm,
     });
 
     reply.header('Content-Type', 'image/png');

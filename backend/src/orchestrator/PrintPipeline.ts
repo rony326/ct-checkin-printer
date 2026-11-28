@@ -195,7 +195,7 @@ export class PrintPipeline {
       Promise.resolve(loadFontPaths(this.deps.db, this.deps.env.DB_PATH, fontIds)),
       loadLogoBuffers(this.deps.db, this.deps.env.DB_PATH, logoIds),
     ]);
-    const bitmap = await renderLabel(layout.elementsJson as LabelElement[], media, context, { dpi: VENDOR_DPI[mediaRow.vendor], fonts, logos });
+    const bitmap = await renderLabel(layout.elementsJson as LabelElement[], media, context, { dpi: VENDOR_DPI[mediaRow.vendor], fonts, logos, lengthMm: layout.lengthMm });
 
     const printStartedAt = Date.now();
     const printResult = await adapter.printLabel(bitmap, media, { copies: layout.copies, rotate: layout.rotate });

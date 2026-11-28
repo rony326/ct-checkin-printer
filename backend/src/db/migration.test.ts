@@ -22,9 +22,8 @@ describe('printer_groups Migration', () => {
     const baselineDir = path.join(tmpDir, 'baseline-migrations');
     const migrationsDir = path.join(import.meta.dirname, '../../migrations');
     const journal = JSON.parse(readFileSync(path.join(migrationsDir, 'meta/_journal.json'), 'utf8'));
-    const baselineEntries = journal.entries.filter(
-      (e: { tag: string }) => !e.tag.startsWith('0005_') && !e.tag.startsWith('0006_') && !e.tag.startsWith('0007_') && !e.tag.startsWith('0008_') && !e.tag.startsWith('0009_'),
-    );
+    // Nach Index filtern: eine spätere Migration in der Baseline liesse Drizzle die älteren überspringen.
+    const baselineEntries = journal.entries.filter((e: { idx: number }) => e.idx < 5);
     cpSync(migrationsDir, baselineDir, { recursive: true });
     for (const entry of journal.entries) {
       if (!baselineEntries.includes(entry)) rmSync(path.join(baselineDir, `${entry.tag}.sql`), { force: true });
@@ -142,7 +141,7 @@ describe('summary_layouts Design Migration', () => {
     const baselineDir = path.join(tmpDir, 'baseline-migrations');
     const journal = JSON.parse(readFileSync(path.join(migrationsDir, 'meta/_journal.json'), 'utf8'));
     cpSync(migrationsDir, baselineDir, { recursive: true });
-    const entries = journal.entries.filter((e: { tag: string }) => !e.tag.startsWith('0009_'));
+    const entries = journal.entries.filter((e: { idx: number }) => e.idx < 9);
     writeFileSync(path.join(baselineDir, 'meta/_journal.json'), JSON.stringify({ ...journal, entries }));
     migrate(createDb(dbPath, { foreignKeys: false }), { migrationsFolder: baselineDir });
 

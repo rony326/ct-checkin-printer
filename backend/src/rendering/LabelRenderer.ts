@@ -56,6 +56,8 @@ export interface RenderLabelOptions {
   fonts?: Record<number, string>;
   /** Nur für Endlosmedien (media.heightMm === null) relevant. */
   bottomMarginMm?: number;
+  /** Feste Länge bei Endlosmedien; null/fehlend = automatisch aus dem Inhalt. Bei Die-Cut-Medien ignoriert. */
+  lengthMm?: number | null;
 }
 
 const fontFamilyCache = new Map<string, string | null>();
@@ -224,19 +226,19 @@ export async function renderLabel(
   context: RenderContext,
   options: RenderLabelOptions,
 ): Promise<RenderedBitmap> {
-  const { dpi, logos = {}, fonts = {}, bottomMarginMm = DEFAULT_BOTTOM_MARGIN_MM } = options;
+  const { dpi, logos = {}, fonts = {}, bottomMarginMm = DEFAULT_BOTTOM_MARGIN_MM, lengthMm } = options;
 
   // Bei Die-Cut-Medien erwartet der Brother-Raster-Helper (`brother_ql.conversion.convert`)
   // ein Bitmap in EXAKT den festen Pixelmassen aus `ALL_LABELS`/`dots_printable` — das ist
   // `media.printableAreaMm`, nicht die nominale Etikettengrösse (`widthMm`/`heightMm`
   // beinhaltet den nicht bedruckbaren Rand). Bei Endlosmaterial ist dieser Check lax
-  // (nur die Breite zählt, die Länge ergibt sich aus dem Inhalt), daher dort weiterhin
-  // die nominale Breite + berechnete Inhaltshöhe.
+  // (nur die Breite zählt, die Länge ist die feste `lengthMm` oder ergibt sich aus dem
+  // Inhalt), daher dort weiterhin die nominale Breite + diese Länge.
   const widthMm = media.dieCut ? media.printableAreaMm.width : media.widthMm;
   const widthPx = mmToPx(widthMm, dpi);
   const heightMm = media.dieCut
     ? media.printableAreaMm.height
-    : Math.max(media.heightMm ?? computeContentHeightMm(elements, context, dpi, bottomMarginMm), MIN_CANVAS_HEIGHT_MM);
+    : Math.max(media.heightMm ?? lengthMm ?? computeContentHeightMm(elements, context, dpi, bottomMarginMm), MIN_CANVAS_HEIGHT_MM);
   const heightPx = mmToPx(heightMm, dpi);
 
   const canvas = createCanvas(widthPx, heightPx);

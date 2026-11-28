@@ -1,0 +1,1 @@
+ALTER TABLE `label_layouts` ADD `length_mm` real;

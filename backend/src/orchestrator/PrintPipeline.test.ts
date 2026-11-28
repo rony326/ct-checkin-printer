@@ -3,6 +3,7 @@ import type { Db } from '../db/client.js';
 import type { Env } from '../env.js';
 import { labelLayoutAlso, labelLayouts, mediaTypes, printLog, printQueue, printerGroups, printers, type LabelElement } from '../db/schema.js';
 import { PrinterStatus, type LabelPrinterAdapter, type PrinterStatusResult } from '../adapters/printer/types.js';
+import { mmToPx, VENDOR_DPI } from '../rendering/dimensions.js';
 import { PrintPipeline } from './PrintPipeline.js';
 import { createTestDb } from './testDb.js';
 
@@ -71,6 +72,18 @@ describe('PrintPipeline.processIncomingJob', () => {
     expect(logs[0]!.code).toBe('ZRYK');
     expect(logs[0]!.qrHash).toMatch(/^[0-9a-f]{40}$/);
     expect(db.select().from(printQueue).all()).toHaveLength(0);
+  });
+
+  it('druckt ein Endlos-Etikett in der festen Länge des Layouts', async () => {
+    const printer = makePrinter('B1');
+    const media = makeMedia();
+    db.insert(labelLayouts).values({ name: 'Eltern', ctTypeKey: 'parent', printerId: printer.id, mediaId: media.id, elementsJson: STATIC_ELEMENTS, lengthMm: 80 }).run();
+    const adapter = makeAdapter();
+    const pipeline = new PrintPipeline({ db, env, adapters: { getAdapter: async () => adapter } });
+
+    await pipeline.processIncomingJob(printer.hostname, RAW_DATA, () => 1735600000000);
+
+    expect(vi.mocked(adapter.printLabel).mock.calls[0]![0].heightPx).toBe(mmToPx(80, VENDOR_DPI['brother-ql']));
   });
 
   it('does nothing when the raw data is empty', async () => {

@@ -78,6 +78,8 @@ export const labelLayouts = sqliteTable('label_layouts', {
   rotate: text('rotate', { enum: ['0', '90', '180', '270'] })
     .notNull()
     .default('0'),
+  /** Feste Länge bei Endlosmedien; null = automatisch aus dem Inhalt. Bei Die-Cut-Medien ignoriert. */
+  lengthMm: real('length_mm'),
   ...timestamps,
 });
 

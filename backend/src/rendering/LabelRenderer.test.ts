@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { LabelElement } from '../db/schema.js';
 import type { MediaDefinition } from '../adapters/printer/types.js';
 import { computeQrHash } from '../template/qrHash.js';
+import { mmToPx } from './dimensions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BUNDLED_FONT_PATH = path.join(__dirname, '../../assets/fonts/DejaVuSans-Bold.ttf');
@@ -90,6 +91,31 @@ describe('renderLabel — Canvas-Grösse', () => {
   it('respektiert die Mindesthöhe bei leerem Endlos-Etikett', async () => {
     const bitmap = await renderLabel([], CONTINUOUS_MEDIA, CONTEXT, { dpi: 300 });
     expect(bitmap.heightPx).toBeGreaterThan(0);
+  });
+
+  it('nutzt bei Endlosmedien eine feste Länge, wenn lengthMm gesetzt ist', async () => {
+    const bitmap = await renderLabel([], CONTINUOUS_MEDIA, CONTEXT, { dpi: 300, lengthMm: 80 });
+    expect(bitmap.heightPx).toBe(mmToPx(80, 300));
+    expect(decode(bitmap).height).toBe(945);
+  });
+
+  it('schneidet Inhalt ab, der über die feste Länge hinausragt', async () => {
+    const elements: LabelElement[] = [{ id: '1', type: 'static', xMm: 0, yMm: 70, value: 'Zu weit unten', fontSize: 40, bold: false, align: 'left' }];
+    const bitmap = await renderLabel(elements, CONTINUOUS_MEDIA, CONTEXT, { dpi: 300, lengthMm: 40 });
+    expect(bitmap.heightPx).toBe(mmToPx(40, 300));
+  });
+
+  it('ignoriert lengthMm bei Die-Cut-Medien', async () => {
+    const without = await renderLabel([], DIE_CUT_MEDIA, CONTEXT, { dpi: 300 });
+    const withLength = await renderLabel([], DIE_CUT_MEDIA, CONTEXT, { dpi: 300, lengthMm: 200 });
+    expect(withLength.heightPx).toBe(without.heightPx);
+  });
+
+  it('verhält sich ohne lengthMm wie bisher', async () => {
+    const elements: LabelElement[] = [{ id: '1', type: 'static', xMm: 0, yMm: 25, value: 'Test', fontSize: 40, bold: false, align: 'left' }];
+    const omitted = await renderLabel(elements, CONTINUOUS_MEDIA, CONTEXT, { dpi: 300 });
+    const explicitNull = await renderLabel(elements, CONTINUOUS_MEDIA, CONTEXT, { dpi: 300, lengthMm: null });
+    expect(explicitNull.heightPx).toBe(omitted.heightPx);
   });
 });
 

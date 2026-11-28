@@ -14,6 +14,7 @@ import type { GenerateSummaryResult } from '../orchestrator/SummaryReportService
 import { noopOrchestrator, type OrchestratorLike } from '../orchestrator/orchestratorLike.js';
 import { DEFAULT_SUMMARY_DESIGN } from '../rendering/summaryDesign.js';
 import { renderSummaryPdf } from '../rendering/SummaryRenderer.js';
+import { mmToPx, VENDOR_DPI } from '../rendering/dimensions.js';
 import { buildServer } from './server.js';
 
 // Der echte Renderer läuft weiter — der Spion zeigt nur, womit er aufgerufen wird.
@@ -212,6 +213,58 @@ describe('Label-Layouts API', () => {
     expect(res.headers['content-type']).toBe('image/png');
     const png = PNG.sync.read(res.rawPayload);
     expect(png.width).toBeGreaterThan(100);
+  });
+
+  async function continuousMedia(): Promise<{ id: number; vendor: keyof typeof VENDOR_DPI }> {
+    const res = await app.inject({ method: 'GET', url: '/api/media-types', headers: { cookie: sessionCookie } });
+    return res.json().find((m: { externalId: string }) => m.externalId === '62');
+  }
+
+  it('speichert eine feste Länge und setzt sie mit null wieder auf automatisch', async () => {
+    const { id: mediaId } = await continuousMedia();
+    const headers = { cookie: sessionCookie, 'content-type': 'application/json' };
+
+    const createRes = await app.inject({ method: 'POST', url: '/api/label-layouts', headers, payload: { name: 'Fest', ctTypeKey: 'fixed', mediaId, lengthMm: 80 } });
+    expect(createRes.statusCode).toBe(201);
+    expect(createRes.json().lengthMm).toBe(80);
+    const url = `/api/label-layouts/${createRes.json().id}`;
+
+    const getRes = await app.inject({ method: 'GET', url, headers: { cookie: sessionCookie } });
+    expect(getRes.json().lengthMm).toBe(80);
+
+    // Ein PUT ohne lengthMm lässt den gespeicherten Wert stehen.
+    const renameRes = await app.inject({ method: 'PUT', url, headers, payload: { name: 'Fest 2' } });
+    expect(renameRes.json().lengthMm).toBe(80);
+
+    const updateRes = await app.inject({ method: 'PUT', url, headers, payload: { lengthMm: null } });
+    expect(updateRes.statusCode).toBe(200);
+    expect(updateRes.json().lengthMm).toBeNull();
+
+    const getAfterRes = await app.inject({ method: 'GET', url, headers: { cookie: sessionCookie } });
+    expect(getAfterRes.json().lengthMm).toBeNull();
+  });
+
+  it.each([0, 1001])('lehnt die feste Länge %s ab', async (lengthMm) => {
+    const { id: mediaId } = await continuousMedia();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/label-layouts',
+      headers: { cookie: sessionCookie, 'content-type': 'application/json' },
+      payload: { name: 'X', ctTypeKey: 'x', mediaId, lengthMm },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rendert die Vorschau eines Endlosmediums in der festen Länge', async () => {
+    const media = await continuousMedia();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/label-layouts/preview',
+      headers: { cookie: sessionCookie, 'content-type': 'application/json' },
+      payload: { elements: [], mediaId: media.id, lengthMm: 50 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(PNG.sync.read(res.rawPayload).height).toBe(mmToPx(50, VENDOR_DPI[media.vendor]));
   });
 });
 
