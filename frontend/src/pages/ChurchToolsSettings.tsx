@@ -74,7 +74,7 @@ export function ChurchToolsSettings() {
             <input id="ct-user" type="text" value={username} onChange={(e) => setUsername(e.target.value)} required />
           </div>
           <div className="field">
-            <label htmlFor="ct-pass">Passwort {state.configured && <span className="hint">(leer lassen, um das gespeicherte zu behalten)</span>}</label>
+            <label htmlFor="ct-pass">Passwort {state.configured && <span className="hint">(leer lassen, um das gespeicherte zu behalten; bei neuer Adresse erneut eingeben)</span>}</label>
             <input id="ct-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={state.configured ? '••••••••' : ''} />
           </div>
 

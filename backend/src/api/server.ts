@@ -26,12 +26,37 @@ import { noopOrchestrator, type OrchestratorLike } from '../orchestrator/orchest
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Gelten für jede Antwort. `style-src 'unsafe-inline'` braucht der Etiketten-Editor (eingefügtes `<style>` für
+ * hochgeladene Schriften), `blob:` die Vorschauen. Kein HSTS: der Dienst läuft ohne eigenes HTTPS.
+ */
+const SECURITY_HEADERS = {
+  'Content-Security-Policy': [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "object-src 'self' blob:",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; '),
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer',
+};
+
 export async function buildServer(db: Db, env: Env, orchestrator: OrchestratorLike = noopOrchestrator) {
   const app = Fastify({ logger: { level: env.LOG_LEVEL } });
 
   app.decorate('db', db);
   app.decorate('env', env);
   app.decorate('orchestrator', orchestrator);
+
+  app.addHook('onRequest', async (_request, reply) => {
+    reply.headers(SECURITY_HEADERS);
+  });
 
   await app.register(cookie);
   await app.register(session, {

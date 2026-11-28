@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { adminUser } from '../db/schema.js';
+import { createLoginLimiter } from './loginLimiter.js';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -21,6 +22,14 @@ declare module 'fastify' {
  * /setup, solange noch kein admin_user existiert.
  */
 export async function registerAuthRoutes(app: FastifyInstance) {
+  const limiter = createLoginLimiter();
+
+  /** Neue Sitzungs-ID bei jeder Anmeldung: ein vorher untergeschobenes Cookie wird so nie angemeldet. */
+  async function startSession(request: FastifyRequest) {
+    await request.session.regenerate();
+    request.session.authenticated = true;
+  }
+
   app.get('/api/auth/status', async (request) => {
     const existing = app.db.select().from(adminUser).get();
     return {
@@ -40,7 +49,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     }
     const passwordHash = await bcrypt.hash(parsed.data.password, BCRYPT_ROUNDS);
     app.db.insert(adminUser).values({ passwordHash }).run();
-    request.session.authenticated = true;
+    await startSession(request);
     return { ok: true };
   });
 
@@ -53,11 +62,20 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     if (!existing) {
       return reply.code(409).send({ error: 'Setup noch nicht abgeschlossen' });
     }
+    const waitSeconds = limiter.attempt(request.ip);
+    if (waitSeconds > 0) {
+      const minutes = Math.ceil(waitSeconds / 60);
+      return reply
+        .code(429)
+        .header('Retry-After', waitSeconds)
+        .send({ error: `Zu viele Fehlversuche. Bitte in ${minutes} ${minutes === 1 ? 'Minute' : 'Minuten'} erneut versuchen.` });
+    }
     const valid = await bcrypt.compare(parsed.data.password, existing.passwordHash);
     if (!valid) {
       return reply.code(401).send({ error: 'Passwort falsch' });
     }
-    request.session.authenticated = true;
+    limiter.reset(request.ip);
+    await startSession(request);
     return { ok: true };
   });
 

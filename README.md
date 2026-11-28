@@ -155,6 +155,17 @@ danach über das Web-GUI verwaltet:
    zusätzlich `also[]` für ein weiteres Etikett auf einem anderen Drucker.
 5. **Webhooks/Sammelausdruck** (optional): siehe unten.
 
+## Sicherheit
+
+- Der Dienst spricht selbst **kein HTTPS**. Er gehört in ein vertrauenswürdiges
+  Netz oder hinter einen Reverse Proxy mit TLS. Die Ersteinrichtung sofort nach
+  dem ersten Start durchführen: bis dahin kann jeder im Netz das Passwort setzen.
+- Nach 10 Anmeldeversuchen ohne Erfolg ist die Absenderadresse für bis zu
+  15 Minuten gesperrt (Neustart hebt die Sperre auf). Hinter einem Reverse Proxy
+  teilen sich alle Benutzer eine Adresse und damit die Sperre.
+- Wird die ChurchTools-Adresse geändert, muss das Passwort neu eingegeben werden.
+- Logos müssen lesbare PNG- oder JPEG-Dateien mit höchstens 16 Megapixeln sein.
+
 ## Zeitfenster (`activeTimes`)
 
 Unverändert zu v1s Grammatik, jetzt als Textfeld im Drucker-Formular

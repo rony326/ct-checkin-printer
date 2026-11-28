@@ -13,6 +13,14 @@ const connectionSchema = z.object({
   password: z.string().min(1).optional(),
 });
 
+const PASSWORD_REQUIRED = 'Bei geänderter ChurchTools-Adresse muss das Passwort neu eingegeben werden.';
+
+/** Gleiches Ziel trotz anderer Schreibweise (Grossbuchstaben im Hostnamen, Schrägstrich am Ende). */
+function isSameAddress(a: string, b: string): boolean {
+  const normalize = (url: string) => new URL(url).href.replace(/\/+$/, '');
+  return normalize(a) === normalize(b);
+}
+
 function getRow(app: FastifyInstance) {
   return app.db.select().from(churchtoolsConnection).get();
 }
@@ -31,6 +39,11 @@ export async function registerChurchToolsConnectionRoutes(app: FastifyInstance) 
     const existing = getRow(app);
     if (!parsed.data.password && !existing) {
       return reply.code(400).send({ error: 'Passwort erforderlich bei der ersten Einrichtung' });
+    }
+
+    // Sonst ginge das gespeicherte Passwort an eine beliebige neu eingetragene Adresse.
+    if (!parsed.data.password && existing && !isSameAddress(parsed.data.baseUrl, existing.baseUrl)) {
+      return reply.code(400).send({ error: PASSWORD_REQUIRED });
     }
 
     const passwordEnc = parsed.data.password ? encryptSecret(parsed.data.password, app.env.ENCRYPTION_KEY) : existing!.passwordEnc;
@@ -63,6 +76,9 @@ export async function registerChurchToolsConnectionRoutes(app: FastifyInstance) 
     if (!parsed.success) return reply.code(400).send({ error: 'Ungültige Eingabe' });
 
     const existing = getRow(app);
+    if (!parsed.data.password && existing && parsed.data.baseUrl && !isSameAddress(parsed.data.baseUrl, existing.baseUrl)) {
+      return reply.code(400).send({ error: PASSWORD_REQUIRED });
+    }
     const baseUrl = parsed.data.baseUrl ?? existing?.baseUrl;
     const username = parsed.data.username ?? existing?.username;
     const password = parsed.data.password ?? (existing ? decryptSecret(existing.passwordEnc, app.env.ENCRYPTION_KEY) : undefined);
