@@ -107,10 +107,6 @@ ersetzt werden — sonst `ModuleNotFoundError`, da die Pakete nur im venv liegen
 
 ## Konfiguration
 
-> **Config-Generator:** [rony326.github.io/ct-checkin-printer](https://rony326.github.io/ct-checkin-printer/) erzeugt `config.js`,
-> `.env` und `label-layout.json` per Formular (läuft komplett im Browser, keine Daten verlassen den Rechner).
-> Quellcode: [`docs/`](docs/).
-
 ### .env
 
 Enthält ausschliesslich Secrets und Umgebungsvariablen.
@@ -617,7 +613,6 @@ LOG_LEVEL=debug npm start
 | `src/secrets.js` | Löst `env:VAR_NAME`-Secret-Referenzen auf |
 | `print_label.py` | Text → PNG → Brother Raster → TCP |
 | `diagnose.js` | Diagnose-Script |
-| `docs/` | Statischer Config-Generator (GitHub Pages) |
 
 ---
 
