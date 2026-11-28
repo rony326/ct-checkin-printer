@@ -64,7 +64,13 @@ function snapshotOf(elements: LabelElement[], mediaId: number | null, lengthMm: 
 }
 
 /** Arbeitsfläche, solange kein Medium bekannt ist. */
-const FALLBACK_AREA: PrintArea = { widthMm: 60, heightMm: DEFAULT_CONTINUOUS_HEIGHT_MM, continuous: true, fixedLength: false };
+const FALLBACK_AREA: PrintArea = {
+  widthMm: 60,
+  heightMm: DEFAULT_CONTINUOUS_HEIGHT_MM,
+  continuous: true,
+  fixedLength: false,
+  openEdge: 'bottom',
+};
 
 interface FontFaces {
   /** Steigt, sobald Schriften geladen sind — Textbreiten müssen dann neu gemessen werden. */

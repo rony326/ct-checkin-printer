@@ -79,23 +79,23 @@ describe('Konstanten', () => {
 
 describe('printAreaMm', () => {
   it('nimmt bei Die-Cut die bedruckbare Fläche', () => {
-    expect(printAreaMm(dieCutMedia, null)).toEqual({ widthMm: 48.9, heightMm: 22.9, continuous: false, fixedLength: false });
+    expect(printAreaMm(dieCutMedia, null)).toEqual({ widthMm: 48.9, heightMm: 22.9, continuous: false, fixedLength: false, openEdge: null });
   });
 
   it('ignoriert bei Die-Cut eine feste Länge', () => {
-    expect(printAreaMm(dieCutMedia, 80)).toEqual({ widthMm: 48.9, heightMm: 22.9, continuous: false, fixedLength: false });
+    expect(printAreaMm(dieCutMedia, 80)).toEqual({ widthMm: 48.9, heightMm: 22.9, continuous: false, fixedLength: false, openEdge: null });
   });
 
   it('nimmt bei Endlos ohne Länge die Arbeitsfläche', () => {
-    expect(printAreaMm(continuousMedia, null)).toEqual({ widthMm: 62, heightMm: 120, continuous: true, fixedLength: false });
+    expect(printAreaMm(continuousMedia, null)).toEqual({ widthMm: 62, heightMm: 120, continuous: true, fixedLength: false, openEdge: 'bottom' });
   });
 
   it('nimmt bei Endlos die feste Länge', () => {
-    expect(printAreaMm(continuousMedia, 80)).toEqual({ widthMm: 62, heightMm: 80, continuous: true, fixedLength: true });
+    expect(printAreaMm(continuousMedia, 80)).toEqual({ widthMm: 62, heightMm: 80, continuous: true, fixedLength: true, openEdge: null });
   });
 
   it('hebt eine zu kurze feste Länge auf die Mindestlänge an, wie der Renderer', () => {
-    expect(printAreaMm(continuousMedia, 4)).toEqual({ widthMm: 62, heightMm: 10, continuous: true, fixedLength: true });
+    expect(printAreaMm(continuousMedia, 4)).toEqual({ widthMm: 62, heightMm: 10, continuous: true, fixedLength: true, openEdge: null });
   });
 
   it('lässt die Arbeitsfläche mit längerem Inhalt mitwachsen (aufgerundet)', () => {
@@ -242,7 +242,7 @@ describe('estimateContentLengthMm', () => {
 });
 
 describe('overflowingElementIds', () => {
-  const area: PrintArea = { widthMm: 48.9, heightMm: 22.9, continuous: false, fixedLength: false };
+  const area: PrintArea = { widthMm: 48.9, heightMm: 22.9, continuous: false, fixedLength: false, openEdge: null };
 
   function ids(boxes: BoxMm[], inArea: PrintArea = area): string[] {
     const elements: LabelElement[] = boxes.map((_, i) => ({ id: `e${i}`, type: 'line', xMm: 0, yMm: 0, widthMm: 1, thicknessMm: 1 }));
@@ -281,7 +281,7 @@ describe('overflowingElementIds', () => {
   });
 
   it('Endlos automatisch: kein Überstand unten, seitlich und oben schon', () => {
-    const auto: PrintArea = { widthMm: 62, heightMm: 120, continuous: true, fixedLength: false };
+    const auto: PrintArea = { widthMm: 62, heightMm: 120, continuous: true, fixedLength: false, openEdge: 'bottom' };
     expect(
       ids(
         [
@@ -309,7 +309,7 @@ describe('overflowingElementIds', () => {
   });
 
   it('Endlos mit fester Länge: Überstand unten wird gemeldet', () => {
-    const fixed: PrintArea = { widthMm: 62, heightMm: 80, continuous: true, fixedLength: true };
+    const fixed: PrintArea = { widthMm: 62, heightMm: 80, continuous: true, fixedLength: true, openEdge: null };
     expect(ids([{ x: 0, y: 78, width: 5, height: 5 }], fixed)).toEqual(['e0']);
   });
 });
@@ -327,7 +327,7 @@ describe('dropAnchorMm', () => {
   });
 });
 
-const SNAP_AREA: PrintArea = { widthMm: 50, heightMm: 30, continuous: false, fixedLength: false };
+const SNAP_AREA: PrintArea = { widthMm: 50, heightMm: 30, continuous: false, fixedLength: false, openEdge: null };
 
 describe('snapTargets', () => {
   const values = (targets: ReturnType<typeof snapTargets>, axis: 'x' | 'y', priority: number) =>
@@ -353,7 +353,7 @@ describe('snapTargets', () => {
   });
 
   it('Endlos automatisch: keine Ziele für Unterkante und senkrechte Mitte des Etiketts', () => {
-    const targets = snapTargets({ widthMm: 62, heightMm: 120, continuous: true, fixedLength: false }, [], 10);
+    const targets = snapTargets({ widthMm: 62, heightMm: 120, continuous: true, fixedLength: false, openEdge: 'bottom' }, [], 10);
     expect(values(targets, 'y', 1)).toEqual([0]);
     expect(values(targets, 'x', 1)).toEqual([0, 31, 62]);
     expect(values(targets, 'y', 3)).toContain(120);
@@ -366,8 +366,18 @@ describe('snapTargets', () => {
   });
 
   it('Endlos mit fester Länge: Unterkante und Mitte sind Ziele', () => {
-    const targets = snapTargets({ widthMm: 62, heightMm: 80, continuous: true, fixedLength: true }, [], null);
+    const targets = snapTargets({ widthMm: 62, heightMm: 80, continuous: true, fixedLength: true, openEdge: null }, [], null);
     expect(values(targets, 'y', 1)).toEqual([0, 40, 80]);
+  });
+
+  it.each([
+    { openEdge: 'top', x: [0, 60, 120], y: [50] },
+    { openEdge: 'right', x: [0], y: [0, 25, 50] },
+    { openEdge: 'left', x: [120], y: [0, 25, 50] },
+  ] as const)('offene Kante $openEdge: nur die gegenüberliegende Kante auf dieser Achse', ({ openEdge, x, y }) => {
+    const targets = snapTargets({ widthMm: 120, heightMm: 50, continuous: true, fixedLength: false, openEdge }, [], null);
+    expect(values(targets, 'x', 1)).toEqual(x);
+    expect(values(targets, 'y', 1)).toEqual(y);
   });
 });
 

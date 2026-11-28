@@ -27,11 +27,15 @@ export const ELEMENT_LIMITS = {
 const OVERFLOW_TOLERANCE_MM = 0.05;
 const MM_PER_INCH = 25.4;
 
+export type Edge = 'top' | 'right' | 'bottom' | 'left';
+
 export interface PrintArea {
   widthMm: number;
   heightMm: number;
   continuous: boolean;
   fixedLength: boolean;
+  /** Kante, an der das Etikett bei automatischer Länge mit dem Inhalt wächst; sonst `null`. */
+  openEdge: Edge | null;
 }
 
 /** Liefert die Textbreite in Druck-px. */
@@ -76,15 +80,16 @@ export function printAreaMm(media: MediaType, lengthMm: number | null, contentLe
   if (media.dieCut) {
     // Die-Cut-Medien haben immer eine Höhe; die Rückfälle bedienen nur den Typ.
     const heightMm = media.printableHeightMm ?? media.heightMm ?? DEFAULT_CONTINUOUS_HEIGHT_MM;
-    return { widthMm: media.printableWidthMm, heightMm, continuous: false, fixedLength: false };
+    return { widthMm: media.printableWidthMm, heightMm, continuous: false, fixedLength: false, openEdge: null };
   }
   if (lengthMm === null) {
     // Gedeckelt, weil ein vertippter Y-Wert sonst einen Canvas erzeugt, an dem der Browser scheitert.
     const heightMm = Math.min(Math.max(DEFAULT_CONTINUOUS_HEIGHT_MM, Math.ceil(contentLengthMm)), MAX_LENGTH_MM);
-    return { widthMm: media.widthMm, heightMm, continuous: true, fixedLength: false };
+    return { widthMm: media.widthMm, heightMm, continuous: true, fixedLength: false, openEdge: 'bottom' };
   }
   // Der Renderer druckt nie kürzer als MIN_LENGTH_MM.
-  return { widthMm: media.widthMm, heightMm: Math.max(lengthMm, MIN_LENGTH_MM), continuous: true, fixedLength: true };
+  const heightMm = Math.max(lengthMm, MIN_LENGTH_MM);
+  return { widthMm: media.widthMm, heightMm, continuous: true, fixedLength: true, openEdge: null };
 }
 
 /** Frei gezogene Anker landen auf diesem Raster. */
@@ -131,15 +136,21 @@ function edges(startMm: number, sizeMm: number): number[] {
   return [startMm, startMm + sizeMm / 2, startMm + sizeMm];
 }
 
+/** Ziele des Etiketts auf einer Achse. An der offenen Kante entfallen sie samt der Mitte: Beides gibt es im Druck nicht. */
+function labelEdges(sizeMm: number, openEdge: Edge | null, startEdge: Edge, endEdge: Edge): number[] {
+  if (openEdge === startEdge) return [sizeMm];
+  if (openEdge === endEdge) return [0];
+  return edges(0, sizeMm);
+}
+
 /** Alle Ziele zum Einrasten; `gridMm: null` → ohne Raster. */
 export function snapTargets(area: PrintArea, others: BoxMm[], gridMm: number | null): SnapTarget[] {
   const targets: SnapTarget[] = [];
   const add = (axis: Axis, priority: SnapTarget['priority'], values: number[]) => {
     for (const valueMm of values) targets.push({ axis, valueMm, priority });
   };
-  add('x', 1, edges(0, area.widthMm));
-  // Bei automatischer Länge ist die Höhe nur Arbeitsfläche: Mitte und Unterkante gibt es im Druck nicht.
-  add('y', 1, area.continuous && !area.fixedLength ? [0] : edges(0, area.heightMm));
+  add('x', 1, labelEdges(area.widthMm, area.openEdge, 'left', 'right'));
+  add('y', 1, labelEdges(area.heightMm, area.openEdge, 'top', 'bottom'));
   for (const box of others) {
     add('x', 2, edges(box.x, box.width));
     add('y', 2, edges(box.y, box.height));
@@ -312,10 +323,10 @@ export function estimateContentLengthMm(boxes: BoxMm[]): number {
   return Math.max(maxBottom + AUTO_BOTTOM_MARGIN_MM, MIN_LENGTH_MM);
 }
 
-/** IDs der Elemente, die über die Fläche hinausragen. `boxes[i]` gehört zu `elements[i]`. */
+/** IDs der Elemente, die über die Fläche hinausragen, alles in Druckkoordinaten. `boxes[i]` gehört zu `elements[i]`. */
 export function overflowingElementIds(elements: LabelElement[], boxes: BoxMm[], area: PrintArea): string[] {
   // Bei automatischer Länge wächst das Etikett mit dem Inhalt: unten ragt erst hinaus, was über die längste Länge geht.
-  const maxBottomMm = area.continuous && !area.fixedLength ? MAX_LENGTH_MM : area.heightMm;
+  const maxBottomMm = area.openEdge === 'bottom' ? MAX_LENGTH_MM : area.heightMm;
   return elements
     .filter((_, i) => {
       const box = boxes[i]!;
