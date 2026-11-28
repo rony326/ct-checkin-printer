@@ -63,11 +63,111 @@ export function printAreaMm(media: MediaType, lengthMm: number | null): PrintAre
 
 /** Frei gezogene Anker landen auf diesem Raster. */
 const DROP_STEP_MM = 0.5;
+/** Feinere Rundung der eingerasteten Achse, damit die Kante auf dem Ziel bleibt. */
+const SNAP_STEP_MM = 0.1;
 
-/** Anker nach dem Ziehen: auf 0,5 mm gerundet, danach auf `[0, maxMm]` begrenzt, damit er auf der Fläche bleibt. */
-export function dropAnchorMm(valueMm: number, maxMm: number): number {
-  const rounded = Math.round(valueMm / DROP_STEP_MM) * DROP_STEP_MM;
-  return Math.min(Math.max(0, rounded), maxMm);
+export function roundMm(value: number, step: number): number {
+  // `toFixed` entfernt Gleitkomma-Reste wie 12.300000000000002.
+  return Number((Math.round(value / step) * step).toFixed(6));
+}
+
+/** Anker nach dem Ziehen: auf `stepMm` gerundet, danach auf `[0, maxMm]` begrenzt, damit er auf der Fläche bleibt. */
+export function dropAnchorMm(valueMm: number, maxMm: number, stepMm: number = DROP_STEP_MM): number {
+  return Math.min(Math.max(0, roundMm(valueMm, stepMm)), maxMm);
+}
+
+/** Grösster Abstand, aus dem eine Kante oder Mitte auf ein Ziel springt. */
+export const SNAP_THRESHOLD_MM = 1.5;
+/** Abstände, die sich weniger unterscheiden, gelten als gleich (Gleitkomma). */
+const SNAP_TIE_MM = 0.001;
+
+export type Axis = 'x' | 'y';
+
+export interface SnapTarget {
+  axis: Axis;
+  valueMm: number;
+  /** 1 Etikett, 2 andere Elemente, 3 Raster — bei gleichem Abstand gewinnt die kleinere Zahl. */
+  priority: 1 | 2 | 3;
+}
+
+export interface Guide {
+  axis: Axis;
+  valueMm: number;
+}
+
+/** Positionen der Rasterlinien von 0 bis zum Flächenrand. */
+export function gridLinesMm(maxMm: number, gridMm: number): number[] {
+  return Array.from({ length: Math.floor(maxMm / gridMm + 1e-9) + 1 }, (_, i) => i * gridMm);
+}
+
+/** Anfang, Mitte und Ende einer Strecke. */
+function edges(startMm: number, sizeMm: number): number[] {
+  return [startMm, startMm + sizeMm / 2, startMm + sizeMm];
+}
+
+/** Alle Ziele zum Einrasten; `gridMm: null` → ohne Raster. */
+export function snapTargets(area: PrintArea, others: BoxMm[], gridMm: number | null): SnapTarget[] {
+  const targets: SnapTarget[] = [];
+  const add = (axis: Axis, priority: SnapTarget['priority'], values: number[]) => {
+    for (const valueMm of values) targets.push({ axis, valueMm, priority });
+  };
+  add('x', 1, edges(0, area.widthMm));
+  // Bei automatischer Länge ist die Höhe nur Arbeitsfläche: Mitte und Unterkante gibt es im Druck nicht.
+  add('y', 1, area.continuous && !area.fixedLength ? [0] : edges(0, area.heightMm));
+  for (const box of others) {
+    add('x', 2, edges(box.x, box.width));
+    add('y', 2, edges(box.y, box.height));
+  }
+  if (gridMm !== null) {
+    add('x', 3, gridLinesMm(area.widthMm, gridMm));
+    add('y', 3, gridLinesMm(area.heightMm, gridMm));
+  }
+  return targets;
+}
+
+/** Nächstes Ziel einer Achse für Anfang, Mitte oder Ende des Kastens. */
+function snapAxis(axis: Axis, positions: number[], targets: SnapTarget[], thresholdMm: number) {
+  const candidates = targets
+    .filter((target) => target.axis === axis)
+    .flatMap((target) => positions.map((position) => ({ target, deltaMm: target.valueMm - position })))
+    .filter((c) => Math.abs(c.deltaMm) <= thresholdMm);
+  const nearest = Math.min(...candidates.map((c) => Math.abs(c.deltaMm)));
+  return candidates
+    .filter((c) => Math.abs(c.deltaMm) - nearest < SNAP_TIE_MM)
+    .sort((a, b) => a.target.priority - b.target.priority || Math.abs(a.deltaMm) - Math.abs(b.deltaMm))[0];
+}
+
+/** Verschiebung, mit der der Kasten je Achse auf dem nächsten Ziel landet, samt Hilfslinien dazu. */
+export function findSnap(moving: BoxMm, targets: SnapTarget[], thresholdMm: number): { dxMm: number; dyMm: number; guides: Guide[] } {
+  const x = snapAxis('x', edges(moving.x, moving.width), targets, thresholdMm);
+  const y = snapAxis('y', edges(moving.y, moving.height), targets, thresholdMm);
+  const guides = [x, y].flatMap((c) => (c ? [{ axis: c.target.axis, valueMm: c.target.valueMm }] : []));
+  return { dxMm: x?.deltaMm ?? 0, dyMm: y?.deltaMm ?? 0, guides };
+}
+
+/**
+ * Wendet das Einrasten auf den Anker eines gezogenen Elements an (`moving` ist
+ * sein Kasten an dieser Stelle). Eingerastete Achsen sind auf 0,1 mm gerundet,
+ * freie bleiben unverändert. Müsste der Anker dafür die Fläche verlassen, wird
+ * auf dieser Achse nicht eingerastet.
+ */
+export function snapAnchor(
+  anchor: { xMm: number; yMm: number },
+  moving: BoxMm,
+  targets: SnapTarget[],
+  area: PrintArea,
+): { xMm: number; yMm: number; guides: Guide[] } {
+  const snap = findSnap(moving, targets, SNAP_THRESHOLD_MM);
+  const result = { xMm: anchor.xMm, yMm: anchor.yMm, guides: [] as Guide[] };
+  for (const guide of snap.guides) {
+    const key = guide.axis === 'x' ? 'xMm' : 'yMm';
+    const maxMm = guide.axis === 'x' ? area.widthMm : area.heightMm;
+    const snapped = anchor[key] + (guide.axis === 'x' ? snap.dxMm : snap.dyMm);
+    if (snapped < -SNAP_STEP_MM / 2 || snapped > maxMm + SNAP_STEP_MM / 2) continue;
+    result[key] = dropAnchorMm(snapped, maxMm, SNAP_STEP_MM);
+    result.guides.push(guide);
+  }
+  return result;
 }
 
 /** Bildet einen zum Anker relativen Punkt gemäss Drehung ab (im Uhrzeigersinn, wie Konvas `rotation`-Prop). */

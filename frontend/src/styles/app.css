@@ -481,6 +481,30 @@ table.list tr.clickable:active {
   overflow: auto;
 }
 
+/* Leiste mit Raster-Einstellungen über dem Entwurf. */
+.grid-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.grid-controls .checkbox-field {
+  margin-bottom: 0;
+}
+
+.grid-controls .field {
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.grid-controls .field select {
+  width: auto;
+}
+
 .paper {
   display: inline-block;
   background: #fff;

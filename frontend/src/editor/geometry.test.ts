@@ -11,6 +11,11 @@ import {
   printAreaMm,
   dropAnchorMm,
   rotateLocal,
+  SNAP_THRESHOLD_MM,
+  findSnap,
+  roundMm,
+  snapAnchor,
+  snapTargets,
   type BoxContext,
   type BoxMm,
   type PrintArea,
@@ -260,5 +265,122 @@ describe('dropAnchorMm', () => {
     expect(dropAnchorMm(48.9, 48.9)).toBe(48.9);
     expect(dropAnchorMm(48.8, 48.9)).toBe(48.9);
     expect(dropAnchorMm(-0.1, 48.9)).toBe(0);
+  });
+});
+
+const SNAP_AREA: PrintArea = { widthMm: 50, heightMm: 30, continuous: false, fixedLength: false };
+
+describe('snapTargets', () => {
+  const values = (targets: ReturnType<typeof snapTargets>, axis: 'x' | 'y', priority: number) =>
+    targets.filter((t) => t.axis === axis && t.priority === priority).map((t) => t.valueMm);
+
+  it('liefert Ränder und Mitten des Etiketts', () => {
+    const targets = snapTargets(SNAP_AREA, [], null);
+    expect(values(targets, 'x', 1)).toEqual([0, 25, 50]);
+    expect(values(targets, 'y', 1)).toEqual([0, 15, 30]);
+    expect(targets).toHaveLength(6);
+  });
+
+  it('liefert Kanten und Mitten der anderen Elemente', () => {
+    const targets = snapTargets(SNAP_AREA, [{ x: 2, y: 4, width: 6, height: 8 }], null);
+    expect(values(targets, 'x', 2)).toEqual([2, 5, 8]);
+    expect(values(targets, 'y', 2)).toEqual([4, 8, 12]);
+  });
+
+  it('erzeugt Rasterlinien von 0 bis zum Flächenrand', () => {
+    const targets = snapTargets({ ...SNAP_AREA, widthMm: 12 }, [], 5);
+    expect(values(targets, 'x', 3)).toEqual([0, 5, 10]);
+    expect(values(targets, 'y', 3)).toEqual([0, 5, 10, 15, 20, 25, 30]);
+  });
+
+  it('Endlos automatisch: keine Ziele für Unterkante und senkrechte Mitte des Etiketts', () => {
+    const targets = snapTargets({ widthMm: 62, heightMm: 120, continuous: true, fixedLength: false }, [], 10);
+    expect(values(targets, 'y', 1)).toEqual([0]);
+    expect(values(targets, 'x', 1)).toEqual([0, 31, 62]);
+    expect(values(targets, 'y', 3)).toContain(120);
+  });
+
+  it('Endlos mit fester Länge: Unterkante und Mitte sind Ziele', () => {
+    const targets = snapTargets({ widthMm: 62, heightMm: 80, continuous: true, fixedLength: true }, [], null);
+    expect(values(targets, 'y', 1)).toEqual([0, 40, 80]);
+  });
+});
+
+describe('findSnap', () => {
+  const labelTargets = snapTargets(SNAP_AREA, [], null);
+
+  it('rastet die Mitte des Kastens auf die Etikettenmitte', () => {
+    const snap = findSnap({ x: 23.2, y: 3, width: 4, height: 4 }, labelTargets, SNAP_THRESHOLD_MM);
+    expect(snap.dxMm).toBeCloseTo(-0.2);
+    expect(snap.guides).toContainEqual({ axis: 'x', valueMm: 25 });
+  });
+
+  it('rastet die linke Kante aufs Raster', () => {
+    const snap = findSnap({ x: 9.6, y: 3, width: 3, height: 4 }, snapTargets(SNAP_AREA, [], 5), SNAP_THRESHOLD_MM);
+    expect(snap.dxMm).toBeCloseTo(0.4);
+    expect(snap.guides).toContainEqual({ axis: 'x', valueMm: 10 });
+  });
+
+  it('bei Gleichstand gewinnt die kleinere Priorität', () => {
+    const targets = snapTargets(SNAP_AREA, [{ x: 25.3, y: 20, width: 12, height: 2 }], null);
+    // Reihenfolge der Ziele darf keine Rolle spielen.
+    for (const ordered of [targets, [...targets].reverse()]) {
+      const snap = findSnap({ x: 23.15, y: 5, width: 4, height: 2 }, ordered, SNAP_THRESHOLD_MM);
+      expect(snap.guides).toEqual([{ axis: 'x', valueMm: 25 }]);
+      expect(snap.dxMm).toBeCloseTo(-0.15);
+    }
+  });
+
+  it('der kleinere Abstand schlägt die kleinere Priorität', () => {
+    const targets = snapTargets(SNAP_AREA, [{ x: 25.3, y: 20, width: 12, height: 2 }], null);
+    const snap = findSnap({ x: 23.2, y: 5, width: 4, height: 2 }, targets, SNAP_THRESHOLD_MM);
+    expect(snap.guides).toEqual([{ axis: 'x', valueMm: 25.3 }]);
+  });
+
+  it('ohne Ziel im Fangbereich passiert nichts', () => {
+    const snap = findSnap({ x: 10, y: 5, width: 4, height: 4 }, labelTargets, SNAP_THRESHOLD_MM);
+    expect(snap).toEqual({ dxMm: 0, dyMm: 0, guides: [] });
+  });
+
+  it('die Achsen rasten unabhängig', () => {
+    const snap = findSnap({ x: 10, y: 0.5, width: 4, height: 4 }, labelTargets, SNAP_THRESHOLD_MM);
+    expect(snap.dxMm).toBe(0);
+    expect(snap.dyMm).toBeCloseTo(-0.5);
+    expect(snap.guides).toEqual([{ axis: 'y', valueMm: 0 }]);
+  });
+
+  it('verträgt einen Kasten ohne Breite', () => {
+    const snap = findSnap({ x: 24.5, y: 3, width: 0, height: 4 }, labelTargets, SNAP_THRESHOLD_MM);
+    expect(snap.dxMm).toBeCloseTo(0.5);
+    expect(Number.isNaN(snap.dyMm)).toBe(false);
+  });
+});
+
+describe('roundMm', () => {
+  it('rundet auf die Schrittweite ohne Gleitkomma-Reste', () => {
+    expect(roundMm(12.345, 0.1)).toBe(12.3);
+    expect(roundMm(12.3, 0.5)).toBe(12.5);
+  });
+});
+
+describe('snapAnchor', () => {
+  const targets = snapTargets(SNAP_AREA, [], null);
+
+  it('rundet die eingerastete Achse auf 0,1 mm und lässt die freie unverändert', () => {
+    // Anker in der Kastenmitte, wie bei zentriertem Text.
+    const result = snapAnchor({ xMm: 24.37, yMm: 6.37 }, { x: 22.37, y: 6.37, width: 4, height: 4 }, targets, SNAP_AREA);
+    expect(result).toEqual({ xMm: 25, yMm: 6.37, guides: [{ axis: 'x', valueMm: 25 }] });
+  });
+
+  it('verwirft ein Einrasten, das den Anker von der Fläche schieben würde', () => {
+    // Anker links, Kasten läuft nach links (z. B. um 180° gedreht): rechte Kante auf 0 hiesse Anker < 0.
+    const result = snapAnchor({ xMm: 0.2, yMm: 8 }, { x: -4, y: 8, width: 5, height: 2 }, targets, SNAP_AREA);
+    expect(result).toEqual({ xMm: 0.2, yMm: 8, guides: [] });
+  });
+
+  it('begrenzt den eingerasteten Anker auf die Fläche', () => {
+    const area: PrintArea = { ...SNAP_AREA, widthMm: 48.96 };
+    const result = snapAnchor({ xMm: 48.5, yMm: 8 }, { x: 44.5, y: 8, width: 4, height: 2 }, snapTargets(area, [], null), area);
+    expect(result.xMm).toBe(48.96);
   });
 });

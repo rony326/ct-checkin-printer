@@ -3,12 +3,35 @@ import { Group, Image as KonvaImage, Layer, Line, Rect, Shape, Stage, Text } fro
 import type Konva from 'konva';
 import type { LabelElement } from '../types.js';
 import { DEFAULT_BOLD_FONT_FAMILY, DEFAULT_FONT_FAMILY } from './fontMetrics.js';
-import { LINE_HEIGHT_FACTOR, dropAnchorMm, type BoxContext, type BoxMm, type PrintArea, type TextLikeElement } from './geometry.js';
+import {
+  LINE_HEIGHT_FACTOR,
+  dropAnchorMm,
+  gridLinesMm,
+  snapAnchor,
+  snapTargets,
+  type BoxContext,
+  type BoxMm,
+  type Guide,
+  type PrintArea,
+  type TextLikeElement,
+} from './geometry.js';
+import type { GridSettings } from './gridSettings.js';
 
 /** Reiner Bildschirm-Massstab fürs interaktive Editieren, unabhängig von der Druck-DPI. */
 export const SCREEN_PX_PER_MM = 4;
 /** Kleinere Kästen werden für die Treffererkennung auf dieses Mass gepolstert, damit dünne Linien greifbar bleiben. */
 const MIN_HIT_SIZE_MM = 2;
+// Konva zeichnet auf Canvas, CSS-Variablen wirken dort nicht — deshalb feste Farbwerte.
+const GRID_COLOR = '#e4e1da';
+const GUIDE_COLOR = '#2b6e63';
+
+/** Laufende Position beim Ziehen: eingerastete Achsen (siehe `guides`) sind gerundet, freie noch nicht. */
+interface DragPreview {
+  id: string;
+  xMm: number;
+  yMm: number;
+  guides: Guide[];
+}
 
 export function mmToScreenPx(mm: number): number {
   return mm * SCREEN_PX_PER_MM;
@@ -64,6 +87,13 @@ function pickElementAt(elements: LabelElement[], boxes: BoxMm[], x: number, y: n
   return null;
 }
 
+/** Linie über die ganze Fläche an der Stelle `valueMm` der Achse. */
+function AreaLine({ axis, valueMm, area, color }: Guide & { area: PrintArea; color: string }) {
+  const at = mmToScreenPx(valueMm);
+  const points = axis === 'x' ? [at, 0, at, mmToScreenPx(area.heightMm)] : [0, at, mmToScreenPx(area.widthMm), at];
+  return <Line points={points} stroke={color} strokeWidth={1} />;
+}
+
 /**
  * Text wie im Renderer: Anker oben, `textAlign` gemäss `align`, jede weitere
  * Zeile `fontSize × LINE_HEIGHT_FACTOR` tiefer. Konvas `Text` zentriert die
@@ -102,19 +132,21 @@ interface Props {
   autoLengthMm: number | null;
   /** Anker→Grundlinie je Schriftfamilie als Anteil der Schriftgrösse. */
   baselineRatios: Record<string, number>;
+  /** Raster anzeigen und Einrasten beim Ziehen. */
+  grid: GridSettings;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onMove: (id: string, xMm: number, yMm: number) => void;
 }
 
-export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm, baselineRatios, selectedId, onSelect, onMove: onMoveElement }: Props) {
+export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm, baselineRatios, grid, selectedId, onSelect, onMove: onMoveElement }: Props) {
   const widthPx = mmToScreenPx(area.widthMm);
   const heightPx = mmToScreenPx(area.heightMm);
 
   const stageRef = useRef<Konva.Stage | null>(null);
-  // Live-Position während des Ziehens, unquantisiert für flüssiges Gefühl — erst beim Loslassen gerundet (siehe finishDrag).
-  const [dragPreview, setDragPreview] = useState<{ id: string; xPx: number; yPx: number } | null>(null);
-  const previewRef = useRef<{ id: string; xPx: number; yPx: number } | null>(null);
+  // Live-Position während des Ziehens; freie Achsen bleiben für ein flüssiges Gefühl unquantisiert und werden erst beim Loslassen gerundet (siehe finishDrag).
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
+  const previewRef = useRef<DragPreview | null>(null);
   const detachRef = useRef<(() => void) | null>(null);
 
   useEffect(() => () => detachRef.current?.(), []);
@@ -141,6 +173,14 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
     const offsetXPx = pos.x - mmToScreenPx(hit.xMm);
     const offsetYPx = pos.y - mmToScreenPx(hit.yMm);
     const id = hit.id;
+    const hitBox = boxes[elements.indexOf(hit)]!;
+    const targets = grid.snap
+      ? snapTargets(
+          area,
+          boxes.filter((_, i) => elements[i]!.id !== id),
+          grid.showGrid ? grid.gridMm : null,
+        )
+      : [];
     setCursor('grabbing');
 
     const onMove = (event: PointerEvent) => {
@@ -148,7 +188,10 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
       // Der Anker bleibt auf der Fläche.
       const xPx = Math.min(Math.max(0, event.clientX - rect.left - offsetXPx), widthPx);
       const yPx = Math.min(Math.max(0, event.clientY - rect.top - offsetYPx), heightPx);
-      previewRef.current = { id, xPx, yPx };
+      const anchor = { xMm: screenPxToMm(xPx), yMm: screenPxToMm(yPx) };
+      const moving = { ...hitBox, x: hitBox.x + anchor.xMm - hit.xMm, y: hitBox.y + anchor.yMm - hit.yMm };
+      // Alt gedrückt = frei ziehen.
+      previewRef.current = { id, ...snapAnchor(anchor, moving, event.altKey ? [] : targets, area) };
       setDragPreview(previewRef.current);
     };
     const finishDrag = () => {
@@ -158,7 +201,12 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
       setDragPreview(null);
       setCursor('grab');
       if (preview) {
-        onMoveElement(preview.id, dropAnchorMm(screenPxToMm(preview.xPx), area.widthMm), dropAnchorMm(screenPxToMm(preview.yPx), area.heightMm));
+        const snapped = (axis: Guide['axis']) => preview.guides.some((guide) => guide.axis === axis);
+        onMoveElement(
+          preview.id,
+          snapped('x') ? preview.xMm : dropAnchorMm(preview.xMm, area.widthMm),
+          snapped('y') ? preview.yMm : dropAnchorMm(preview.yMm, area.heightMm),
+        );
       }
     };
     const detach = () => {
@@ -189,13 +237,23 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
       <Stage ref={stageRef} width={Math.ceil(widthPx)} height={Math.ceil(heightPx)} onPointerDown={handlePointerDown} onPointerMove={handleHover}>
         <Layer listening={false}>
           <Rect x={0} y={0} width={widthPx} height={heightPx} fill="white" stroke="#e4e1da" />
+          {grid.showGrid && (
+            <>
+              {gridLinesMm(area.widthMm, grid.gridMm).map((valueMm) => (
+                <AreaLine key={`x${valueMm}`} axis="x" valueMm={valueMm} area={area} color={GRID_COLOR} />
+              ))}
+              {gridLinesMm(area.heightMm, grid.gridMm).map((valueMm) => (
+                <AreaLine key={`y${valueMm}`} axis="y" valueMm={valueMm} area={area} color={GRID_COLOR} />
+              ))}
+            </>
+          )}
           {elements.map((el) => {
             const isSelected = el.id === selectedId;
             const strokeColor = isSelected ? '#2b6e63' : '#c9c5ba';
             const inkColor = isSelected ? '#2b6e63' : '#1c1b19';
             const isDragging = dragPreview?.id === el.id;
-            const x = isDragging ? dragPreview.xPx : mmToScreenPx(el.xMm);
-            const y = isDragging ? dragPreview.yPx : mmToScreenPx(el.yMm);
+            const x = mmToScreenPx(isDragging ? dragPreview.xMm : el.xMm);
+            const y = mmToScreenPx(isDragging ? dragPreview.yMm : el.yMm);
 
             // Leicht transparent, solange es „in der Hand" liegt.
             const groupProps = { x, y, rotation: Number(el.rotate ?? '0'), opacity: isDragging ? 0.75 : 1 };
@@ -246,6 +304,7 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
               </Group>
             );
           })}
+          {dragPreview?.guides.map((guide) => <AreaLine key={guide.axis} {...guide} area={area} color={GUIDE_COLOR} />)}
           {autoLengthPx !== null && autoLengthPx <= heightPx && (
             <Group y={autoLengthPx}>
               <Line points={[0, 0, widthPx, 0]} stroke="#b0573c" strokeWidth={1} dash={[6, 4]} />

@@ -15,6 +15,8 @@ import {
   type TextLikeElement,
 } from '../editor/geometry.js';
 import { DEFAULT_BOLD_FONT_FAMILY, DEFAULT_FONT_FAMILY, editorFontFamily, topBaselineRatio } from '../editor/fontMetrics.js';
+import { GridControls } from '../editor/GridControls.js';
+import { useGridSettings } from '../editor/gridSettings.js';
 import { PropertiesPanel, elementTypeLabel } from '../editor/PropertiesPanel.js';
 import { Toolbar } from '../editor/Toolbar.js';
 import type { FontEntry, LabelElement, LabelElementType, LabelLayout, LogoEntry, MediaType, VariableDefs } from '../types.js';
@@ -190,6 +192,7 @@ export function LayoutEditor() {
 
   const { fontsVersion, baselineRatios, loadedFamilies } = useFontFaces(fonts);
   const logoImages = useLogoImages(elements, logos);
+  const [gridSettings, setGridSettings] = useGridSettings();
 
   async function loadAll() {
     let results;
@@ -448,7 +451,8 @@ export function LayoutEditor() {
           <Toolbar elements={elements} selectedId={selectedId} onAdd={addElement} onSelect={setSelectedId} />
 
           <div className="editor-stage">
-            <div>
+            {/* Zentriert den Entwurf unter der breiteren Raster-Leiste. */}
+            <div style={{ textAlign: 'center' }}>
               <p className="hint" style={{ textAlign: 'center', marginBottom: '0.5rem' }}>
                 Entwurf — ziehen oder mit Pfeiltasten verschieben (Shift = 5 mm)
               </p>
@@ -457,6 +461,7 @@ export function LayoutEditor() {
                   Ragt über das Etikett hinaus und wird abgeschnitten: {overflowLabels.join(', ')}
                 </p>
               )}
+              <GridControls settings={gridSettings} onChange={setGridSettings} />
               <Canvas
                 area={area}
                 boxes={boxes}
@@ -465,6 +470,7 @@ export function LayoutEditor() {
                 logoImages={logoImages}
                 autoLengthMm={autoLengthMm}
                 baselineRatios={baselineRatios}
+                grid={gridSettings}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 onMove={moveElement}
