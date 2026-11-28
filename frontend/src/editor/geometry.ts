@@ -13,7 +13,7 @@ export const DEFAULT_CONTINUOUS_HEIGHT_MM = 120;
 export const AUTO_BOTTOM_MARGIN_MM = 2;
 /** Kürzestes Endlos-Etikett. */
 export const MIN_LENGTH_MM = 10;
-/** Längste feste Länge, die die API annimmt. */
+/** Längstes Endlos-Etikett, fest oder automatisch (wie `MAX_CONTINUOUS_LENGTH_MM` im Renderer). */
 export const MAX_LENGTH_MM = 1000;
 /** Bis zu diesem Mass gilt ein Überstand als Rundungsrauschen. */
 const OVERFLOW_TOLERANCE_MM = 0.05;

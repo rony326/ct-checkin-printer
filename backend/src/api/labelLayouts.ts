@@ -5,7 +5,7 @@ import type { MediaDefinition } from '../adapters/printer/types.js';
 import { requireAuth } from '../auth/routes.js';
 import { labelLayoutAlso, labelLayouts, mediaTypes, type LabelElement } from '../db/schema.js';
 import { VENDOR_DPI } from '../rendering/dimensions.js';
-import { renderLabel } from '../rendering/LabelRenderer.js';
+import { renderLabel, MAX_CONTINUOUS_LENGTH_MM } from '../rendering/LabelRenderer.js';
 import { buildMockRenderContext } from '../template/variables.js';
 import { resolveFontPaths } from './fonts.js';
 import { resolveLogoBuffers } from './logos.js';
@@ -46,7 +46,7 @@ const labelElementSchema = z.discriminatedUnion('type', [
 ]);
 
 /** Feste Länge bei Endlosmedien; null = automatisch aus dem Inhalt. */
-const lengthMmSchema = z.number().positive().max(1000).nullable().optional();
+const lengthMmSchema = z.number().positive().max(MAX_CONTINUOUS_LENGTH_MM).nullable().optional();
 
 const createLayoutSchema = z.object({
   name: z.string().min(1),

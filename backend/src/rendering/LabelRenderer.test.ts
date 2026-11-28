@@ -93,6 +93,33 @@ describe('renderLabel — Canvas-Grösse', () => {
     expect(bitmap.heightPx).toBeGreaterThan(0);
   });
 
+  it('begrenzt die automatische Länge auf 1000 mm (Tippfehler darf keinen meterlangen Druck auslösen)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const elements: LabelElement[] = [{ id: '1', type: 'static', xMm: 0, yMm: 10000, value: 'Test', fontSize: 40, bold: false, align: 'left' }];
+    const bitmap = await renderLabel(elements, CONTINUOUS_MEDIA, CONTEXT, { dpi: 300 });
+    expect(bitmap.heightPx).toBe(mmToPx(1000, 300));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('1000 mm'));
+    warn.mockRestore();
+  });
+
+  it('kürzt auch sehr viele checkin.extra-Zeilen auf 1000 mm', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const elements: LabelElement[] = [{ id: '1', type: 'text', xMm: 0, yMm: 0, field: 'checkin.extra', fontSize: 40, bold: false, align: 'left' }];
+    const context = { ...CONTEXT, checkin: { ...CONTEXT.checkin, extra: Array.from({ length: 500 }, (_, i) => `Zeile ${i}`) } };
+    const bitmap = await renderLabel(elements, CONTINUOUS_MEDIA, context, { dpi: 300 });
+    expect(bitmap.heightPx).toBe(mmToPx(1000, 300));
+    warn.mockRestore();
+  });
+
+  it('warnt nicht, wenn die automatische Länge unter der Grenze bleibt', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const elements: LabelElement[] = [{ id: '1', type: 'static', xMm: 0, yMm: 900, value: 'Test', fontSize: 40, bold: false, align: 'left' }];
+    const bitmap = await renderLabel(elements, CONTINUOUS_MEDIA, CONTEXT, { dpi: 300 });
+    expect(bitmap.heightPx).toBeLessThan(mmToPx(1000, 300));
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('nutzt bei Endlosmedien eine feste Länge, wenn lengthMm gesetzt ist', async () => {
     const bitmap = await renderLabel([], CONTINUOUS_MEDIA, CONTEXT, { dpi: 300, lengthMm: 80 });
     expect(bitmap.heightPx).toBe(mmToPx(80, 300));

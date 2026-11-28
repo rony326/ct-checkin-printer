@@ -25,6 +25,8 @@ import { decodeLogo } from './logoImage.js';
 const LINE_HEIGHT_FACTOR = 1.3;
 const DEFAULT_BOTTOM_MARGIN_MM = 2;
 const MIN_CANVAS_HEIGHT_MM = 10;
+/** Obergrenze für Endlosetiketten, fest wie automatisch — ein Tippfehler in Y darf nicht meterweise Rolle verbrauchen. */
+export const MAX_CONTINUOUS_LENGTH_MM = 1000;
 const ROTATE_RADIANS: Record<'0' | '90' | '180' | '270', number> = { '0': 0, '90': Math.PI / 2, '180': Math.PI, '270': (3 * Math.PI) / 2 };
 export const FALLBACK_REGULAR_FAMILY = 'CtCheckinFallback';
 export const FALLBACK_BOLD_FAMILY = 'CtCheckinFallback-Bold';
@@ -120,6 +122,14 @@ function computeContentHeightMm(elements: LabelElement[], ctx: RenderContext, dp
     if (bottom > maxBottom) maxBottom = bottom;
   }
   return maxBottom + bottomMarginMm;
+}
+
+/** Länge eines Endlosetiketts ohne feste Vorgabe: aus dem Inhalt, gekappt bei `MAX_CONTINUOUS_LENGTH_MM`. */
+function autoLengthMm(elements: LabelElement[], ctx: RenderContext, dpi: number, bottomMarginMm: number): number {
+  const contentMm = computeContentHeightMm(elements, ctx, dpi, bottomMarginMm);
+  if (contentMm <= MAX_CONTINUOUS_LENGTH_MM) return contentMm;
+  console.warn(`Etikett wäre ${Math.round(contentMm)} mm lang, es wird bei ${MAX_CONTINUOUS_LENGTH_MM} mm abgeschnitten.`);
+  return MAX_CONTINUOUS_LENGTH_MM;
 }
 
 function drawTextLines(
@@ -238,7 +248,7 @@ export async function renderLabel(
   const widthPx = mmToPx(widthMm, dpi);
   const heightMm = media.dieCut
     ? media.printableAreaMm.height
-    : Math.max(media.heightMm ?? lengthMm ?? computeContentHeightMm(elements, context, dpi, bottomMarginMm), MIN_CANVAS_HEIGHT_MM);
+    : Math.max(media.heightMm ?? lengthMm ?? autoLengthMm(elements, context, dpi, bottomMarginMm), MIN_CANVAS_HEIGHT_MM);
   const heightPx = mmToPx(heightMm, dpi);
 
   const canvas = createCanvas(widthPx, heightPx);
