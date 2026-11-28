@@ -9,6 +9,7 @@ import {
   estimateContentLengthMm,
   overflowingElementIds,
   printAreaMm,
+  dropAnchorMm,
   rotateLocal,
   type BoxContext,
   type BoxMm,
@@ -246,5 +247,18 @@ describe('overflowingElementIds', () => {
   it('Endlos mit fester Länge: Überstand unten wird gemeldet', () => {
     const fixed: PrintArea = { widthMm: 62, heightMm: 80, continuous: true, fixedLength: true };
     expect(ids([{ x: 0, y: 78, width: 5, height: 5 }], fixed)).toEqual(['e0']);
+  });
+});
+
+describe('dropAnchorMm', () => {
+  it('rundet auf 0,5 mm', () => {
+    expect(dropAnchorMm(12.3, 48.9)).toBe(12.5);
+    expect(dropAnchorMm(12.2, 48.9)).toBe(12);
+  });
+
+  it('bleibt nach dem Runden auf der Fläche', () => {
+    expect(dropAnchorMm(48.9, 48.9)).toBe(48.9);
+    expect(dropAnchorMm(48.8, 48.9)).toBe(48.9);
+    expect(dropAnchorMm(-0.1, 48.9)).toBe(0);
   });
 });

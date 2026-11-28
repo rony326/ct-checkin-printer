@@ -7,6 +7,21 @@
  * selbst aus der Schriftdatei und zeichnet ab der Grundlinie.
  */
 
+import type { TextLikeElement } from './geometry.js';
+
+/** Familien der mitgelieferten Druckschrift (DejaVu Sans), siehe `useFontFaces` im LayoutEditor. */
+export const DEFAULT_FONT_FAMILY = 'ctp-default';
+export const DEFAULT_BOLD_FONT_FAMILY = 'ctp-default-bold';
+
+/**
+ * Schriftwahl wie im Renderer: die eigene Schrift, falls sie geladen werden
+ * konnte, sonst die mitgelieferte Druckschrift in Regular bzw. Bold.
+ */
+export function editorFontFamily(el: TextLikeElement, loadedFamilies: ReadonlySet<string>): string {
+  if (el.fontId !== undefined && loadedFamilies.has(`font-${el.fontId}`)) return `font-${el.fontId}`;
+  return el.bold ? DEFAULT_BOLD_FONT_FAMILY : DEFAULT_FONT_FAMILY;
+}
+
 interface TableRecord {
   offset: number;
   length: number;
@@ -37,9 +52,11 @@ export function topBaselineRatio(buffer: ArrayBuffer): number | null {
     const unitsPerEm = view.getUint16(head.offset + 18);
     if (unitsPerEm === 0) return null;
 
-    // Wie FreeType: hhea, bei fehlenden Werten OS/2.
-    let ascender = view.getInt16(hhea.offset + 4);
+    // Wie FreeType: mit USE_TYPO_METRICS (fsSelection Bit 7) der Typo-Ascent,
+    // sonst hhea und bei fehlenden Werten OS/2.
     const os2 = tables.get('OS/2');
+    const useTypoMetrics = os2 !== undefined && (view.getUint16(os2.offset + 62) & 0x80) !== 0;
+    let ascender = useTypoMetrics ? view.getInt16(os2.offset + 68) : view.getInt16(hhea.offset + 4);
     if (ascender === 0 && os2) {
       ascender = view.getInt16(os2.offset + 68) || view.getUint16(os2.offset + 74);
     }

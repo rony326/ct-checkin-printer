@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { topBaselineRatio } from './fontMetrics.js';
+import { editorFontFamily, topBaselineRatio } from './fontMetrics.js';
+import type { LabelElement } from '../types.js';
 
 function fontFile(name: string): ArrayBuffer {
   const bytes = readFileSync(fileURLToPath(new URL(`../../../backend/assets/fonts/${name}`, import.meta.url)));
@@ -9,9 +10,8 @@ function fontFile(name: string): ArrayBuffer {
 }
 
 /** Minimale sfnt-Datei mit `head`, `hhea` und `post`. */
-function sfnt(tables: Record<string, Array<[offset: number, value: number]>>): ArrayBuffer {
+function sfnt(tables: Record<string, Array<[offset: number, value: number]>>, tableSize = 32): ArrayBuffer {
   const tags = Object.keys(tables);
-  const tableSize = 32;
   const headerSize = 12 + tags.length * 16;
   const view = new DataView(new ArrayBuffer(headerSize + tags.length * tableSize));
   view.setUint32(0, 0x00010000);
@@ -39,6 +39,14 @@ describe('topBaselineRatio', () => {
     expect(topBaselineRatio(buffer)).toBeCloseTo(0.75);
   });
 
+  it('nimmt bei USE_TYPO_METRICS den Typo-Ascent statt hhea, wie FreeType', () => {
+    const tables = { head: [[18, 1000]], hhea: [[4, 900]], post: [[8, -100], [10, 50]] } as Record<string, Array<[number, number]>>;
+    const withTypo = sfnt({ ...tables, 'OS/2': [[62, 0x80], [68, 800]] }, 96);
+    expect(topBaselineRatio(withTypo)).toBeCloseTo(0.65);
+    const withoutFlag = sfnt({ ...tables, 'OS/2': [[62, 0x40], [68, 800]] }, 96);
+    expect(topBaselineRatio(withoutFlag)).toBeCloseTo(0.75);
+  });
+
   it('lässt fehlende Unterstreichungs-Angaben weg', () => {
     const buffer = sfnt({ head: [[18, 1000]], hhea: [[4, 900]] });
     expect(topBaselineRatio(buffer)).toBeCloseTo(0.9);
@@ -47,5 +55,24 @@ describe('topBaselineRatio', () => {
   it('gibt bei unlesbaren Daten null zurück', () => {
     expect(topBaselineRatio(new ArrayBuffer(8))).toBeNull();
     expect(topBaselineRatio(sfnt({ head: [[18, 1000]] }))).toBeNull();
+  });
+});
+
+describe('editorFontFamily', () => {
+  const text = (extra: Partial<Extract<LabelElement, { type: 'static' }>>) =>
+    ({ id: 't', type: 'static', xMm: 0, yMm: 0, value: 'x', fontSize: 40, bold: false, align: 'left', ...extra }) as Extract<LabelElement, { type: 'static' }>;
+
+  it('nimmt die eigene Schrift, wenn sie geladen ist', () => {
+    expect(editorFontFamily(text({ fontId: 3, bold: true }), new Set(['font-3']))).toBe('font-3');
+  });
+
+  it('fällt wie der Renderer auf die Druckschrift zurück, wenn die eigene Schrift fehlt', () => {
+    expect(editorFontFamily(text({ fontId: 3 }), new Set(['font-4']))).toBe('ctp-default');
+    expect(editorFontFamily(text({ fontId: 3, bold: true }), new Set())).toBe('ctp-default-bold');
+  });
+
+  it('nimmt ohne eigene Schrift die Druckschrift in Regular bzw. Bold', () => {
+    expect(editorFontFamily(text({}), new Set())).toBe('ctp-default');
+    expect(editorFontFamily(text({ bold: true }), new Set())).toBe('ctp-default-bold');
   });
 });

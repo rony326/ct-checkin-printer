@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, postForBlob, uploadFile } from '../api/client.js';
-import { Canvas, DEFAULT_BOLD_FONT_FAMILY, DEFAULT_FONT_FAMILY, cssFont } from '../editor/Canvas.js';
+import { Canvas, cssFont } from '../editor/Canvas.js';
 import {
   DEFAULT_CONTINUOUS_HEIGHT_MM,
   elementBoxMm,
@@ -14,7 +14,7 @@ import {
   type PrintArea,
   type TextLikeElement,
 } from '../editor/geometry.js';
-import { topBaselineRatio } from '../editor/fontMetrics.js';
+import { DEFAULT_BOLD_FONT_FAMILY, DEFAULT_FONT_FAMILY, editorFontFamily, topBaselineRatio } from '../editor/fontMetrics.js';
 import { PropertiesPanel, elementTypeLabel } from '../editor/PropertiesPanel.js';
 import { Toolbar } from '../editor/Toolbar.js';
 import type { FontEntry, LabelElement, LabelElementType, LabelLayout, LogoEntry, MediaType, VariableDefs } from '../types.js';
@@ -65,6 +65,8 @@ interface FontFaces {
   fontsVersion: number;
   /** Anker→Grundlinie je Familie, siehe `topBaselineRatio`. */
   baselineRatios: Record<string, number>;
+  /** Familien, die tatsächlich geladen werden konnten. */
+  loadedFamilies: ReadonlySet<string>;
 }
 
 /**
@@ -73,7 +75,7 @@ interface FontFaces {
  * denselben Dateien die senkrechte Lage, die der Renderer verwendet.
  */
 function useFontFaces(fonts: FontEntry[]): FontFaces {
-  const [state, setState] = useState<FontFaces>({ fontsVersion: 0, baselineRatios: {} });
+  const [state, setState] = useState<FontFaces>({ fontsVersion: 0, baselineRatios: {}, loadedFamilies: new Set() });
   const downloadsRef = useRef(new Map<string, Promise<ArrayBuffer>>());
   useEffect(() => {
     const sources = [
@@ -105,12 +107,13 @@ function useFontFaces(fonts: FontEntry[]): FontFaces {
     ).then((results) => {
       if (cancelled) return;
       const baselineRatios: Record<string, number> = {};
+      const loadedFamilies = new Set<string>();
       for (const result of results) {
-        if (result.status === 'fulfilled' && result.value && result.value.ratio !== null) {
-          baselineRatios[result.value.family] = result.value.ratio;
-        }
+        if (result.status !== 'fulfilled' || !result.value) continue;
+        loadedFamilies.add(result.value.family);
+        if (result.value.ratio !== null) baselineRatios[result.value.family] = result.value.ratio;
       }
-      setState((prev) => ({ fontsVersion: prev.fontsVersion + 1, baselineRatios }));
+      setState((prev) => ({ fontsVersion: prev.fontsVersion + 1, baselineRatios, loadedFamilies }));
     });
     return () => {
       cancelled = true;
@@ -185,7 +188,7 @@ export function LayoutEditor() {
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
   const previewUrlRef = useRef<string | null>(null);
 
-  const { fontsVersion, baselineRatios } = useFontFaces(fonts);
+  const { fontsVersion, baselineRatios, loadedFamilies } = useFontFaces(fonts);
   const logoImages = useLogoImages(elements, logos);
 
   async function loadAll() {
@@ -225,21 +228,19 @@ export function LayoutEditor() {
 
   // Neu nach jedem Schriften-Laden, damit alle abhängigen Kästen neu gemessen werden.
   const measure = useMemo(() => createMeasure(), [fontsVersion]);
-  const boxCtx = useMemo<BoxContext>(() => {
-    const fontIds = new Set(fonts.map((f) => f.id));
-    return {
+  const boxCtx = useMemo<BoxContext>(
+    () => ({
       dpi: media ? VENDOR_DPI[media.vendor] : 300,
       resolveText: (el) => resolveDraftText(el, variables),
-      // Wie der Renderer: eigene Schrift, sonst die mitgelieferte Druckschrift in Regular bzw. Bold.
-      fontFamily: (el) =>
-        el.fontId !== undefined && fontIds.has(el.fontId) ? `font-${el.fontId}` : el.bold ? DEFAULT_BOLD_FONT_FAMILY : DEFAULT_FONT_FAMILY,
+      fontFamily: (el) => editorFontFamily(el, loadedFamilies),
       measure,
       logoAspect: (logoId) => {
         const img = logoImages[logoId];
         return img && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : undefined;
       },
-    };
-  }, [media, variables, fonts, measure, logoImages]);
+    }),
+    [media, variables, loadedFamilies, measure, logoImages],
+  );
   const boxes = useMemo<BoxMm[]>(() => elements.map((el) => elementBoxMm(el, boxCtx)), [elements, boxCtx]);
   // Der Renderer ignoriert bei der automatischen Länge die Drehung.
   const autoLengthMm = useMemo(

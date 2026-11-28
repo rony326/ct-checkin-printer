@@ -2,24 +2,20 @@ import { useEffect, useRef, useState } from 'react';
 import { Group, Image as KonvaImage, Layer, Line, Rect, Shape, Stage, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { LabelElement } from '../types.js';
-import { LINE_HEIGHT_FACTOR, type BoxContext, type BoxMm, type PrintArea, type TextLikeElement } from './geometry.js';
+import { DEFAULT_BOLD_FONT_FAMILY, DEFAULT_FONT_FAMILY } from './fontMetrics.js';
+import { LINE_HEIGHT_FACTOR, dropAnchorMm, type BoxContext, type BoxMm, type PrintArea, type TextLikeElement } from './geometry.js';
 
 /** Reiner Bildschirm-Massstab fürs interaktive Editieren, unabhängig von der Druck-DPI. */
 export const SCREEN_PX_PER_MM = 4;
 /** Kleinere Kästen werden für die Treffererkennung auf dieses Mass gepolstert, damit dünne Linien greifbar bleiben. */
 const MIN_HIT_SIZE_MM = 2;
-/** Frei gezogene Elemente landen auf diesem Raster. */
-const DRAG_ROUNDING_MM = 0.5;
-/** Familien der mitgelieferten Druckschrift (DejaVu Sans), siehe `useFontFaces` im LayoutEditor. */
-export const DEFAULT_FONT_FAMILY = 'ctp-default';
-export const DEFAULT_BOLD_FONT_FAMILY = 'ctp-default-bold';
 
 export function mmToScreenPx(mm: number): number {
   return mm * SCREEN_PX_PER_MM;
 }
 
-function screenPxToRoundedMm(px: number): number {
-  return Math.round(px / SCREEN_PX_PER_MM / DRAG_ROUNDING_MM) * DRAG_ROUNDING_MM;
+function screenPxToMm(px: number): number {
+  return px / SCREEN_PX_PER_MM;
 }
 
 /**
@@ -161,7 +157,9 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
       previewRef.current = null;
       setDragPreview(null);
       setCursor('grab');
-      if (preview) onMoveElement(preview.id, screenPxToRoundedMm(preview.xPx), screenPxToRoundedMm(preview.yPx));
+      if (preview) {
+        onMoveElement(preview.id, dropAnchorMm(screenPxToMm(preview.xPx), area.widthMm), dropAnchorMm(screenPxToMm(preview.yPx), area.heightMm));
+      }
     };
     const detach = () => {
       window.removeEventListener('pointermove', onMove);

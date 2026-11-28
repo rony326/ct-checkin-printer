@@ -61,6 +61,15 @@ export function printAreaMm(media: MediaType, lengthMm: number | null): PrintAre
   return { widthMm: media.widthMm, heightMm: Math.max(lengthMm, MIN_LENGTH_MM), continuous: true, fixedLength: true };
 }
 
+/** Frei gezogene Anker landen auf diesem Raster. */
+const DROP_STEP_MM = 0.5;
+
+/** Anker nach dem Ziehen: auf 0,5 mm gerundet, danach auf `[0, maxMm]` begrenzt, damit er auf der Fläche bleibt. */
+export function dropAnchorMm(valueMm: number, maxMm: number): number {
+  const rounded = Math.round(valueMm / DROP_STEP_MM) * DROP_STEP_MM;
+  return Math.min(Math.max(0, rounded), maxMm);
+}
+
 /** Bildet einen zum Anker relativen Punkt gemäss Drehung ab (im Uhrzeigersinn, wie Konvas `rotation`-Prop). */
 export function rotateLocal(lx: number, ly: number, rotate: Rotate | undefined): { x: number; y: number } {
   switch (rotate) {
