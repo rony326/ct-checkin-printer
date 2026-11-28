@@ -465,13 +465,12 @@ export function LayoutEditor() {
           <Toolbar elements={elements} selectedId={selectedId} onAdd={addElement} onSelect={setSelectedId} />
 
           <div className="editor-stage">
-            {/* Zentriert den Entwurf unter der breiteren Raster-Leiste. */}
-            <div style={{ textAlign: 'center' }}>
-              <p className="hint" style={{ textAlign: 'center', marginBottom: '0.5rem' }}>
+            <div>
+              <p className="hint" style={{ marginBottom: '0.5rem' }}>
                 Entwurf — ziehen oder mit Pfeiltasten verschieben (Shift = 5 mm)
               </p>
               {overflowLabels.length > 0 && (
-                <p className="error-text" role="status" style={{ textAlign: 'center', marginBottom: '0.5rem' }}>
+                <p className="error-text" role="status" style={{ marginBottom: '0.5rem' }}>
                   Ragt über das Etikett hinaus und wird abgeschnitten: {overflowLabels.join(', ')}
                 </p>
               )}
@@ -493,13 +492,13 @@ export function LayoutEditor() {
             </div>
 
             <div>
-              <p className="hint" style={{ textAlign: 'center', marginBottom: '0.5rem' }}>
+              <p className="hint" style={{ marginBottom: '0.5rem' }}>
                 Echte Vorschau (mit Testdaten)
               </p>
               {previewError ? (
                 <p className="error-text">{previewError}</p>
               ) : previewUrl ? (
-                <img src={previewUrl} alt="Etiketten-Vorschau" className="paper" style={{ maxWidth: 320, display: 'block' }} />
+                <img src={previewUrl} alt="Etiketten-Vorschau" className="paper" style={{ maxWidth: 'min(320px, 100%)' }} />
               ) : (
                 <p className="hint">Wird gerendert…</p>
               )}

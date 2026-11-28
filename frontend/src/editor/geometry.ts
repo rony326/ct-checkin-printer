@@ -62,7 +62,7 @@ export function parseLengthInput(text: string): number | null {
 /**
  * Die-Cut: die bedruckbare Fläche. Endlos: nominale Breite (wie im Renderer)
  * und die feste Länge, ohne diese nur eine Arbeitsfläche, die mit dem Inhalt
- * (`contentLengthMm`) mitwächst.
+ * (`contentLengthMm`) bis höchstens `MAX_LENGTH_MM` mitwächst.
  */
 export function printAreaMm(media: MediaType, lengthMm: number | null, contentLengthMm = 0): PrintArea {
   if (media.dieCut) {
@@ -71,7 +71,8 @@ export function printAreaMm(media: MediaType, lengthMm: number | null, contentLe
     return { widthMm: media.printableWidthMm, heightMm, continuous: false, fixedLength: false };
   }
   if (lengthMm === null) {
-    const heightMm = Math.max(DEFAULT_CONTINUOUS_HEIGHT_MM, Math.ceil(contentLengthMm));
+    // Gedeckelt, weil ein vertippter Y-Wert sonst einen Canvas erzeugt, an dem der Browser scheitert.
+    const heightMm = Math.min(Math.max(DEFAULT_CONTINUOUS_HEIGHT_MM, Math.ceil(contentLengthMm)), MAX_LENGTH_MM);
     return { widthMm: media.widthMm, heightMm, continuous: true, fixedLength: false };
   }
   // Der Renderer druckt nie kürzer als MIN_LENGTH_MM.
@@ -305,8 +306,8 @@ export function estimateContentLengthMm(boxes: BoxMm[]): number {
 
 /** IDs der Elemente, die über die Fläche hinausragen. `boxes[i]` gehört zu `elements[i]`. */
 export function overflowingElementIds(elements: LabelElement[], boxes: BoxMm[], area: PrintArea): string[] {
-  // Bei automatischer Länge wächst das Etikett mit dem Inhalt: unten ragt nichts hinaus.
-  const checkBottom = !area.continuous || area.fixedLength;
+  // Bei automatischer Länge wächst das Etikett mit dem Inhalt: unten ragt erst hinaus, was über die längste Länge geht.
+  const maxBottomMm = area.continuous && !area.fixedLength ? MAX_LENGTH_MM : area.heightMm;
   return elements
     .filter((_, i) => {
       const box = boxes[i]!;
@@ -314,7 +315,7 @@ export function overflowingElementIds(elements: LabelElement[], boxes: BoxMm[], 
         box.x < -OVERFLOW_TOLERANCE_MM ||
         box.y < -OVERFLOW_TOLERANCE_MM ||
         box.x + box.width > area.widthMm + OVERFLOW_TOLERANCE_MM ||
-        (checkBottom && box.y + box.height > area.heightMm + OVERFLOW_TOLERANCE_MM)
+        box.y + box.height > maxBottomMm + OVERFLOW_TOLERANCE_MM
       );
     })
     .map((el) => el.id);

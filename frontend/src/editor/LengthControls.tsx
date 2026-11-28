@@ -48,7 +48,7 @@ export function LengthControls({ lengthMm, contentLengthMm, onChange }: Props) {
       </label>
       {lengthMm !== null && (
         <div className="field">
-          <label htmlFor={fid('length')}>Länge (mm)</label>
+          <label htmlFor={fid('length')}>Etikettenlänge (mm)</label>
           <input
             id={fid('length')}
             type="number"

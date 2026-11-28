@@ -103,6 +103,12 @@ describe('printAreaMm', () => {
     expect(printAreaMm(continuousMedia, null, 80).heightMm).toBe(120);
   });
 
+  it('begrenzt die automatische Arbeitsfläche auf die längste Etikettenlänge', () => {
+    expect(printAreaMm(continuousMedia, null, 999.2).heightMm).toBe(1000);
+    expect(printAreaMm(continuousMedia, null, 10_022).heightMm).toBe(MAX_LENGTH_MM);
+    expect(printAreaMm(continuousMedia, null, 1e12).heightMm).toBe(MAX_LENGTH_MM);
+  });
+
   it('beachtet die Inhaltslänge weder bei fester Länge noch bei Die-Cut', () => {
     expect(printAreaMm(continuousMedia, 80, 150).heightMm).toBe(80);
     expect(printAreaMm(dieCutMedia, null, 150).heightMm).toBe(22.9);
@@ -288,6 +294,20 @@ describe('overflowingElementIds', () => {
     ).toEqual(['e1', 'e2']);
   });
 
+  it('Endlos automatisch: meldet, was über die längste Etikettenlänge hinausragt', () => {
+    const capped = printAreaMm(continuousMedia, null, 10_022);
+    expect(
+      ids(
+        [
+          { x: 0, y: 995, width: 5, height: 5.04 },
+          { x: 0, y: 995, width: 5, height: 5.06 },
+          { x: 0, y: 10_000, width: 5, height: 5 },
+        ],
+        capped,
+      ),
+    ).toEqual(['e1', 'e2']);
+  });
+
   it('Endlos mit fester Länge: Überstand unten wird gemeldet', () => {
     const fixed: PrintArea = { widthMm: 62, heightMm: 80, continuous: true, fixedLength: true };
     expect(ids([{ x: 0, y: 78, width: 5, height: 5 }], fixed)).toEqual(['e0']);
@@ -337,6 +357,12 @@ describe('snapTargets', () => {
     expect(values(targets, 'y', 1)).toEqual([0]);
     expect(values(targets, 'x', 1)).toEqual([0, 31, 62]);
     expect(values(targets, 'y', 3)).toContain(120);
+  });
+
+  it('bleibt auch bei riesigem Inhalt überschaubar', () => {
+    const area = printAreaMm(continuousMedia, null, 1e12);
+    // Feinstes Raster: 0 bis 62 mm waagrecht, 0 bis 1000 mm senkrecht.
+    expect(values(snapTargets(area, [], 2.5), 'y', 3)).toHaveLength(401);
   });
 
   it('Endlos mit fester Länge: Unterkante und Mitte sind Ziele', () => {

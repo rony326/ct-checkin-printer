@@ -489,7 +489,12 @@ table.list tr.clickable:active {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  align-items: center;
+  /*
+   * Die Kinder bleiben so breit wie die Bühne, damit die Leisten umbrechen. Ein
+   * breiterer Entwurf läuft nur nach rechts über und ist ganz erreichbar —
+   * `align-items: center` hätte ihn links unscrollbar abgeschnitten.
+   */
+  text-align: center;
   overflow: auto;
 }
 
