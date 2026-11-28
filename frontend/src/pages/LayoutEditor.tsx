@@ -4,10 +4,12 @@ import { api, postForBlob, uploadFile } from '../api/client.js';
 import { Canvas, cssFont } from '../editor/Canvas.js';
 import {
   DEFAULT_CONTINUOUS_HEIGHT_MM,
+  alignElement,
   elementBoxMm,
   estimateContentLengthMm,
   overflowingElementIds,
   printAreaMm,
+  type AlignCommand,
   type BoxContext,
   type BoxMm,
   type MeasureText,
@@ -344,6 +346,12 @@ export function LayoutEditor() {
     setElements((prev) => prev.map((el) => (el.id === elId ? { ...el, xMm, yMm } : el)));
   }
 
+  function alignSelected(cmd: AlignCommand) {
+    const index = elements.findIndex((el) => el.id === selectedId);
+    if (index < 0) return;
+    updateElement(alignElement(elements[index]!, cmd, area, boxes[index]!));
+  }
+
   async function handleSave() {
     setSaving(true);
     setSaveMessage(null);
@@ -496,7 +504,9 @@ export function LayoutEditor() {
             variables={variables}
             fonts={fonts}
             logos={logos}
+            autoLength={area.continuous && !area.fixedLength}
             onChange={updateElement}
+            onAlign={alignSelected}
             onDelete={() => selectedId && deleteElement(selectedId)}
             onUploadFont={handleUploadFont}
             onUploadLogo={handleUploadLogo}

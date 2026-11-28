@@ -1,29 +1,85 @@
 import type { ChangeEvent } from 'react';
 import type { Align, FontEntry, LabelElement, LogoEntry, QrContentPath, Rotate, TextFieldPath, VariableDefs } from '../types.js';
 import { useFieldId } from '../components/useFieldId.js';
+import type { AlignCommand } from './geometry.js';
 
 interface Props {
   element: LabelElement | null;
   variables: VariableDefs;
   fonts: FontEntry[];
   logos: LogoEntry[];
+  /** Endlosmaterial ohne feste Länge: senkrecht gibt es dann kein Mass zum Ausrichten. */
+  autoLength: boolean;
   onChange: (updated: LabelElement) => void;
+  onAlign: (cmd: AlignCommand) => void;
   onDelete: () => void;
   onUploadFont: (file: File) => void;
   onUploadLogo: (file: File) => void;
 }
 
-function NumberField({ label, value, onChange, min }: { label: string; value: number; onChange: (v: number) => void; min?: number }) {
-  const fid = useFieldId();
+interface AlignButton {
+  cmd: AlignCommand;
+  text: string;
+  label: string;
+}
+
+const HORIZONTAL_BUTTONS: AlignButton[] = [
+  { cmd: 'left', text: 'Links', label: 'Links ausrichten' },
+  { cmd: 'hcenter', text: 'Mitte', label: 'Waagrecht zentrieren' },
+  { cmd: 'right', text: 'Rechts', label: 'Rechts ausrichten' },
+];
+
+const VERTICAL_BUTTONS: AlignButton[] = [
+  { cmd: 'top', text: 'Oben', label: 'Oben ausrichten' },
+  { cmd: 'vcenter', text: 'Mitte', label: 'Senkrecht zentrieren' },
+  { cmd: 'bottom', text: 'Unten', label: 'Unten ausrichten' },
+];
+
+const ALIGN_GROUPS = [
+  { label: 'Waagrecht ausrichten', buttons: HORIZONTAL_BUTTONS },
+  { label: 'Senkrecht ausrichten', buttons: VERTICAL_BUTTONS },
+];
+
+const NEEDS_LENGTH_HINT = 'Bei automatischer Länge nicht möglich – wähle eine feste Länge';
+
+function AlignButtons({ autoLength, onAlign }: { autoLength: boolean; onAlign: (cmd: AlignCommand) => void }) {
   return (
-    <div className="field">
-      <label htmlFor={fid('f1')}>{label}</label>
-      <input id={fid('f1')} type="number" value={value} min={min} onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(Number(e.target.value))} />
+    <div className="align-buttons">
+      {ALIGN_GROUPS.map((group) => (
+        <div key={group.label} className="btn-row" role="group" aria-label={group.label}>
+          {group.buttons.map(({ cmd, text, label }) => {
+            const disabled = autoLength && (cmd === 'vcenter' || cmd === 'bottom');
+            return (
+              <button
+                key={cmd}
+                type="button"
+                className="btn"
+                aria-label={label}
+                title={disabled ? NEEDS_LENGTH_HINT : label}
+                disabled={disabled}
+                onClick={() => onAlign(cmd)}
+              >
+                {text}
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
 
-export function PropertiesPanel({ element, variables, fonts, logos, onChange, onDelete, onUploadFont, onUploadLogo }: Props) {
+function NumberField({ label, value, onChange, min, step }: { label: string; value: number; onChange: (v: number) => void; min?: number; step?: number }) {
+  const fid = useFieldId();
+  return (
+    <div className="field">
+      <label htmlFor={fid('f1')}>{label}</label>
+      <input id={fid('f1')} type="number" value={value} min={min} step={step} onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(Number(e.target.value))} />
+    </div>
+  );
+}
+
+export function PropertiesPanel({ element, variables, fonts, logos, autoLength, onChange, onAlign, onDelete, onUploadFont, onUploadLogo }: Props) {
   const fid = useFieldId();
   if (!element) {
     return (
@@ -35,8 +91,8 @@ export function PropertiesPanel({ element, variables, fonts, logos, onChange, on
 
   const positionFields = (
     <div className="field-row">
-      <NumberField label="X (mm)" value={element.xMm} onChange={(v) => onChange({ ...element, xMm: v })} />
-      <NumberField label="Y (mm)" value={element.yMm} onChange={(v) => onChange({ ...element, yMm: v })} />
+      <NumberField label="X (mm)" step={0.1} value={element.xMm} onChange={(v) => onChange({ ...element, xMm: v })} />
+      <NumberField label="Y (mm)" step={0.1} value={element.yMm} onChange={(v) => onChange({ ...element, yMm: v })} />
     </div>
   );
 
@@ -61,6 +117,7 @@ export function PropertiesPanel({ element, variables, fonts, logos, onChange, on
         </button>
       </div>
 
+      <AlignButtons autoLength={autoLength} onAlign={onAlign} />
       {positionFields}
       {rotateField}
 

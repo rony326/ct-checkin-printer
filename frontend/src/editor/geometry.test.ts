@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { LabelElement, MediaType } from '../types.js';
 import {
   AUTO_BOTTOM_MARGIN_MM,
+  alignElement,
   DEFAULT_CONTINUOUS_HEIGHT_MM,
   LINE_HEIGHT_FACTOR,
   MIN_LENGTH_MM,
@@ -413,5 +414,62 @@ describe('releaseAnchorMm', () => {
   it('behält eingerastete Achsen unverändert', () => {
     expect(releaseAnchorMm({ xMm: 9.4, yMm: 12.3, guides: [{ axis: 'x', valueMm: 25 }] }, SNAP_AREA)).toEqual({ xMm: 9.4, yMm: 12.5 });
     expect(releaseAnchorMm({ xMm: 12.3, yMm: 21.9, guides: [{ axis: 'y', valueMm: 22.9 }] }, SNAP_AREA)).toEqual({ xMm: 12.5, yMm: 21.9 });
+  });
+});
+
+describe('alignElement', () => {
+  const qr: LabelElement = { id: 'q', type: 'qr', xMm: 7, yMm: 3, content: 'qr:hash', sizeMm: 20 };
+  const align = (el: LabelElement, cmd: Parameters<typeof alignElement>[1], area: PrintArea = SNAP_AREA) =>
+    alignElement(el, cmd, area, elementBoxMm(el, ctx));
+
+  it('richtet ein Element waagrecht aus und lässt Y unverändert', () => {
+    expect(align(qr, 'left')).toEqual({ ...qr, xMm: 0 });
+    expect(align(qr, 'hcenter')).toEqual({ ...qr, xMm: 15 });
+    expect(align(qr, 'right')).toEqual({ ...qr, xMm: 30 });
+  });
+
+  it('richtet ein Element senkrecht aus und lässt X unverändert', () => {
+    expect(align(qr, 'top')).toEqual({ ...qr, yMm: 0 });
+    expect(align(qr, 'vcenter')).toEqual({ ...qr, yMm: 5 });
+    expect(align(qr, 'bottom')).toEqual({ ...qr, yMm: 10 });
+  });
+
+  it('setzt bei ungedrehtem Text Ausrichtung und Anker', () => {
+    const text = staticText('Hallo', { xMm: 7, align: 'right' });
+    expect(align(text, 'left')).toEqual({ ...text, align: 'left', xMm: 0 });
+    expect(align(text, 'hcenter')).toEqual({ ...text, align: 'center', xMm: 25 });
+    expect(align({ ...text, rotate: '0' } as LabelElement, 'right')).toEqual({ ...text, rotate: '0', align: 'right', xMm: 50 });
+  });
+
+  it('setzt auch bei Variablenfeldern ohne Textbreite einen gültigen Anker', () => {
+    const field: LabelElement = { id: 'v', type: 'text', xMm: 7, yMm: 4, field: 'person.name', fontSize: 40, bold: false, align: 'left' };
+    const empty = { ...ctx, resolveText: () => '' };
+    const box = elementBoxMm(field, empty);
+    expect(alignElement(field, 'right', SNAP_AREA, box)).toEqual({ ...field, align: 'right', xMm: 50 });
+    const rotated: LabelElement = { ...field, rotate: '90' };
+    expect(alignElement(rotated, 'hcenter', SNAP_AREA, elementBoxMm(rotated, empty))).toEqual({ ...rotated, xMm: 27.2 });
+  });
+
+  it('zentriert Text senkrecht auf 0,1 mm gerundet', () => {
+    const text = staticText('Hallo');
+    expect(align(text, 'vcenter')).toEqual({ ...text, yMm: 11.7 });
+  });
+
+  it('verschiebt gedrehten Text nach seiner Hülle, ohne die Ausrichtung zu ändern', () => {
+    const text = staticText('Hallo', { rotate: '90', align: 'left' });
+    const result = align(text, 'hcenter');
+    expect(result).toEqual({ ...text, xMm: 28.3 });
+    const box = elementBoxMm(result, ctx);
+    expect(Math.abs(box.x + box.width / 2 - 25)).toBeLessThanOrEqual(0.05);
+  });
+
+  it('richtet ein gedrehtes Element mit der Hülle am Rand aus', () => {
+    const turned: LabelElement = { ...qr, rotate: '180' };
+    expect(align(turned, 'left')).toEqual({ ...turned, xMm: 20 });
+    expect(align(turned, 'bottom')).toEqual({ ...turned, yMm: 30 });
+  });
+
+  it('zentriert auch Elemente, die breiter als die Fläche sind', () => {
+    expect(align({ ...qr, sizeMm: 60 }, 'hcenter')).toMatchObject({ xMm: -5 });
   });
 });

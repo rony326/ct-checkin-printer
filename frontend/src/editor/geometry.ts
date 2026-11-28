@@ -245,6 +245,38 @@ export function elementBoxMm(el: LabelElement, ctx: BoxContext): BoxMm {
   };
 }
 
+export type AlignCommand = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom';
+
+/** Achse eines Befehls und Lage auf der Fläche: 0 Anfang, 0.5 Mitte, 1 Ende. */
+const ALIGN_COMMANDS: Record<AlignCommand, { axis: Axis; fraction: number }> = {
+  left: { axis: 'x', fraction: 0 },
+  hcenter: { axis: 'x', fraction: 0.5 },
+  right: { axis: 'x', fraction: 1 },
+  top: { axis: 'y', fraction: 0 },
+  vcenter: { axis: 'y', fraction: 0.5 },
+  bottom: { axis: 'y', fraction: 1 },
+};
+
+const TEXT_ALIGN_BY_FRACTION: Record<number, Align> = { 0: 'left', 0.5: 'center', 1: 'right' };
+
+/**
+ * Richtet ein Element an der Fläche aus; `box` ist sein Kasten (`elementBoxMm`).
+ * Ungedrehter Text erhält waagrecht die passende `align` samt Anker, damit er
+ * auch mit anderer Textlänge (Variablen) ausgerichtet bleibt. Sonst wandert der
+ * Anker, bis die Hülle am Ziel liegt. Bei automatischer Länge sind `vcenter` und
+ * `bottom` sinnlos, weil die Höhe nur Arbeitsfläche ist.
+ */
+export function alignElement(el: LabelElement, cmd: AlignCommand, area: PrintArea, box: BoxMm): LabelElement {
+  const { axis, fraction } = ALIGN_COMMANDS[cmd];
+  if (axis === 'x') {
+    if ((el.type === 'text' || el.type === 'static') && (el.rotate ?? '0') === '0') {
+      return { ...el, align: TEXT_ALIGN_BY_FRACTION[fraction]!, xMm: roundMm(area.widthMm * fraction, SNAP_STEP_MM) };
+    }
+    return { ...el, xMm: roundMm(el.xMm + (area.widthMm - box.width) * fraction - box.x, SNAP_STEP_MM) };
+  }
+  return { ...el, yMm: roundMm(el.yMm + (area.heightMm - box.height) * fraction - box.y, SNAP_STEP_MM) };
+}
+
 /**
  * Länge eines Endlos-Etiketts ohne feste Länge. Der Renderer ignoriert dabei
  * die Drehung, deshalb übergibt der Aufrufer ungedrehte Kästen.

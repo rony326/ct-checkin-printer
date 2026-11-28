@@ -264,6 +264,18 @@
   gap: 0.5rem;
 }
 
+/* Ausrichten-Knöpfe im Etiketten-Editor: je Achse eine gleichmässig geteilte Zeile. */
+.align-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.align-buttons .btn {
+  flex: 1;
+}
+
 /* Grosse Auswahlkarten (z.B. Einzel- vs. Router-Drucker). */
 .choice-grid {
   display: grid;
