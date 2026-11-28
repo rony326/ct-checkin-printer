@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test": "vitest run",
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.3",
-    "vite": "^6.1.1"
+    "vite": "^6.1.1",
+    "vitest": "^3.0.6"
   }
 }

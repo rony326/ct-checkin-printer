@@ -34,6 +34,8 @@ export interface LabelLayout {
   printerId: number | null;
   mediaId: number | null;
   elementsJson: LabelElement[];
+  /** Feste Länge bei Endlosmedien; null = automatisch aus dem Inhalt. */
+  lengthMm: number | null;
   copies: number;
   rotate: Rotate;
   createdAt: string;

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Group, Layer, Rect, Stage, Text } from 'react-konva';
 import type Konva from 'konva';
-import type { Align, LabelElement, MediaType, Rotate, VariableDefs } from '../types.js';
+import type { Align, LabelElement, MediaType, VariableDefs } from '../types.js';
 import { VENDOR_DPI } from '../types.js';
+import { DEFAULT_CONTINUOUS_HEIGHT_MM, rotateLocal } from './geometry.js';
 
 /** Reiner Bildschirm-Massstab fürs interaktive Editieren, unabhängig von der Druck-DPI. */
 export const SCREEN_PX_PER_MM = 4;
-export const DEFAULT_CONTINUOUS_HEIGHT_MM = 120;
 /** Grobe Zeilenhöhe für die Klick-Trefferzone von Text — Konvas eigene Text-Metrik ist hier nicht nötig, siehe `computeBoxes`. */
 const TEXT_LINE_HEIGHT_FACTOR = 1.2;
 
@@ -47,20 +47,6 @@ interface ElementBox {
   y: number;
   width: number;
   height: number;
-}
-
-/** Bildet einen zum Anker relativen Punkt gemäss Drehung ab (im Uhrzeigersinn, wie Konvas `rotation`-Prop). */
-function rotateLocal(lx: number, ly: number, rotate: Rotate | undefined): { x: number; y: number } {
-  switch (rotate) {
-    case '90':
-      return { x: -ly, y: lx };
-    case '180':
-      return { x: -lx, y: -ly };
-    case '270':
-      return { x: ly, y: -lx };
-    default:
-      return { x: lx, y: ly };
-  }
 }
 
 /**

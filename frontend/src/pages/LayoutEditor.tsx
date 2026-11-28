@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, postForBlob, uploadFile } from '../api/client.js';
-import { Canvas, DEFAULT_CONTINUOUS_HEIGHT_MM } from '../editor/Canvas.js';
+import { Canvas } from '../editor/Canvas.js';
+import { DEFAULT_CONTINUOUS_HEIGHT_MM } from '../editor/geometry.js';
 import { PropertiesPanel } from '../editor/PropertiesPanel.js';
 import { Toolbar } from '../editor/Toolbar.js';
 import type { FontEntry, LabelElement, LabelElementType, LabelLayout, LogoEntry, MediaType, VariableDefs } from '../types.js';
