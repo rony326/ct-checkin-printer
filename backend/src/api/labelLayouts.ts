@@ -5,7 +5,7 @@ import type { MediaDefinition } from '../adapters/printer/types.js';
 import { requireAuth } from '../auth/routes.js';
 import { labelLayoutAlso, labelLayouts, mediaTypes, type LabelElement } from '../db/schema.js';
 import { VENDOR_DPI } from '../rendering/dimensions.js';
-import { renderLabel, MAX_CONTINUOUS_LENGTH_MM } from '../rendering/LabelRenderer.js';
+import { renderLabel, MAX_CONTINUOUS_LENGTH_MM, ELEMENT_LIMITS } from '../rendering/LabelRenderer.js';
 import { buildMockRenderContext } from '../template/variables.js';
 import { resolveFontPaths } from './fonts.js';
 import { resolveLogoBuffers } from './logos.js';
@@ -14,6 +14,13 @@ const textFieldEnum = z.enum(['person.name', 'person.id', 'checkin.code', 'check
 const alignEnum = z.enum(['left', 'center', 'right']);
 const rotateEnum = z.enum(['0', '90', '180', '270']);
 
+/** Positive Zahl bis zur Obergrenze, mit einer Meldung, die im Editor verständlich ist. */
+function sizeUpTo(name: string, max: number) {
+  return z.number().positive().max(max, `${name}: höchstens ${max}`);
+}
+
+const fontSizeSchema = sizeUpTo('Schriftgrösse', ELEMENT_LIMITS.fontSize);
+
 const labelElementSchema = z.discriminatedUnion('type', [
   z.object({
     id: z.string(),
@@ -21,7 +28,7 @@ const labelElementSchema = z.discriminatedUnion('type', [
     xMm: z.number(),
     yMm: z.number(),
     field: textFieldEnum,
-    fontSize: z.number().positive(),
+    fontSize: fontSizeSchema,
     bold: z.boolean(),
     align: alignEnum,
     fontId: z.number().optional(),
@@ -34,15 +41,15 @@ const labelElementSchema = z.discriminatedUnion('type', [
     xMm: z.number(),
     yMm: z.number(),
     value: z.string(),
-    fontSize: z.number().positive(),
+    fontSize: fontSizeSchema,
     bold: z.boolean(),
     align: alignEnum,
     fontId: z.number().optional(),
     rotate: rotateEnum.optional(),
   }),
-  z.object({ id: z.string(), type: z.literal('logo'), xMm: z.number(), yMm: z.number(), logoId: z.number(), heightMm: z.number().positive(), rotate: rotateEnum.optional() }),
-  z.object({ id: z.string(), type: z.literal('qr'), xMm: z.number(), yMm: z.number(), content: z.enum(['qr:hash', 'qr:personId']), sizeMm: z.number().positive(), rotate: rotateEnum.optional() }),
-  z.object({ id: z.string(), type: z.literal('line'), xMm: z.number(), yMm: z.number(), widthMm: z.number().positive(), thicknessMm: z.number().positive(), rotate: rotateEnum.optional() }),
+  z.object({ id: z.string(), type: z.literal('logo'), xMm: z.number(), yMm: z.number(), logoId: z.number(), heightMm: sizeUpTo('Logo-Höhe', ELEMENT_LIMITS.logoHeightMm), rotate: rotateEnum.optional() }),
+  z.object({ id: z.string(), type: z.literal('qr'), xMm: z.number(), yMm: z.number(), content: z.enum(['qr:hash', 'qr:personId']), sizeMm: sizeUpTo('QR-Grösse', ELEMENT_LIMITS.qrSizeMm), rotate: rotateEnum.optional() }),
+  z.object({ id: z.string(), type: z.literal('line'), xMm: z.number(), yMm: z.number(), widthMm: sizeUpTo('Linien-Länge', ELEMENT_LIMITS.lineWidthMm), thicknessMm: sizeUpTo('Linien-Dicke', ELEMENT_LIMITS.lineThicknessMm), rotate: rotateEnum.optional() }),
 ]);
 
 /** Feste Länge bei Endlosmedien; null = automatisch aus dem Inhalt. */

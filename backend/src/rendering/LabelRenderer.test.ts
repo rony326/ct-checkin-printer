@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { PNG } from 'pngjs';
+import { createCanvas } from '@napi-rs/canvas';
 import { describe, expect, it, vi } from 'vitest';
 import type { LabelElement } from '../db/schema.js';
 import type { MediaDefinition } from '../adapters/printer/types.js';
@@ -143,6 +144,26 @@ describe('renderLabel — Canvas-Grösse', () => {
     const omitted = await renderLabel(elements, CONTINUOUS_MEDIA, CONTEXT, { dpi: 300 });
     const explicitNull = await renderLabel(elements, CONTINUOUS_MEDIA, CONTEXT, { dpi: 300, lengthMm: null });
     expect(explicitNull.heightPx).toBe(omitted.heightPx);
+  });
+});
+
+describe('renderLabel — Grössenbegrenzung der Elemente', () => {
+  const base = { id: '1', xMm: 0, yMm: 0 };
+  const text = { ...base, type: 'static', value: 'A', bold: false, align: 'left' } as const;
+  const cases: Array<[string, LabelElement, LabelElement]> = [
+    ['QR-Code', { ...base, type: 'qr', content: 'qr:personId', sizeMm: 400 }, { ...base, type: 'qr', content: 'qr:personId', sizeMm: 200 }],
+    ['Logo', { ...base, type: 'logo', logoId: 1, heightMm: 400 }, { ...base, type: 'logo', logoId: 1, heightMm: 200 }],
+    ['Linie (Länge)', { ...base, type: 'line', widthMm: 5, thicknessMm: 400 }, { ...base, type: 'line', widthMm: 5, thicknessMm: 200 }],
+    ['Schrift', { ...text, fontSize: 4000 }, { ...text, fontSize: 2000 }],
+  ];
+
+  it.each(cases)('kappt übergrosse Werte (%s), auch aus bereits gespeicherten Layouts', async (_name, tooBig, atLimit) => {
+    const logo = createCanvas(10, 10).toBuffer('image/png');
+    const options = { dpi: 300, logos: { 1: logo } };
+    const big = await renderLabel([tooBig], CONTINUOUS_MEDIA, CONTEXT, options);
+    const limit = await renderLabel([atLimit], CONTINUOUS_MEDIA, CONTEXT, options);
+    expect(big.heightPx).toBe(limit.heightPx);
+    expect(big.data.equals(limit.data)).toBe(true);
   });
 });
 

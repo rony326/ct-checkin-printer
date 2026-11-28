@@ -2,6 +2,7 @@ import type { ChangeEvent } from 'react';
 import type { Align, FontEntry, LabelElement, LogoEntry, QrContentPath, Rotate, TextFieldPath, VariableDefs } from '../types.js';
 import { useFieldId } from '../components/useFieldId.js';
 import type { AlignCommand } from './geometry.js';
+import { ELEMENT_LIMITS } from './geometry.js';
 
 interface Props {
   element: LabelElement | null;
@@ -69,12 +70,12 @@ function AlignButtons({ autoLength, onAlign }: { autoLength: boolean; onAlign: (
   );
 }
 
-function NumberField({ label, value, onChange, min, step }: { label: string; value: number; onChange: (v: number) => void; min?: number; step?: number }) {
+function NumberField({ label, value, onChange, min, max, step }: { label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number }) {
   const fid = useFieldId();
   return (
     <div className="field">
       <label htmlFor={fid('f1')}>{label}</label>
-      <input id={fid('f1')} type="number" value={value} min={min} step={step} onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(Number(e.target.value))} />
+      <input id={fid('f1')} type="number" value={value} min={min} max={max} step={step} onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(Number(e.target.value))} />
     </div>
   );
 }
@@ -149,7 +150,7 @@ export function PropertiesPanel({ element, variables, fonts, logos, autoLength, 
           )}
 
           <div className="field-row">
-            <NumberField label="Schriftgrösse" value={element.fontSize} min={1} onChange={(v) => onChange({ ...element, fontSize: v })} />
+            <NumberField label="Schriftgrösse" value={element.fontSize} min={1} max={ELEMENT_LIMITS.fontSize} onChange={(v) => onChange({ ...element, fontSize: v })} />
             <div className="field">
               <label htmlFor={fid('f5')}>Ausrichtung</label>
               <select id={fid('f5')} value={element.align} onChange={(e) => onChange({ ...element, align: e.target.value as Align })}>
@@ -190,7 +191,7 @@ export function PropertiesPanel({ element, variables, fonts, logos, autoLength, 
 
       {element.type === 'logo' && (
         <>
-          <NumberField label="Höhe (mm)" value={element.heightMm} min={1} onChange={(v) => onChange({ ...element, heightMm: v })} />
+          <NumberField label="Höhe (mm)" value={element.heightMm} min={1} max={ELEMENT_LIMITS.logoHeightMm} onChange={(v) => onChange({ ...element, heightMm: v })} />
           <div className="field">
             <label htmlFor={fid('f7')}>Logo</label>
             <select id={fid('f7')} value={element.logoId} onChange={(e) => onChange({ ...element, logoId: Number(e.target.value) })}>
@@ -218,14 +219,14 @@ export function PropertiesPanel({ element, variables, fonts, logos, autoLength, 
               ))}
             </select>
           </div>
-          <NumberField label="Grösse (mm)" value={element.sizeMm} min={1} onChange={(v) => onChange({ ...element, sizeMm: v })} />
+          <NumberField label="Grösse (mm)" value={element.sizeMm} min={1} max={ELEMENT_LIMITS.qrSizeMm} onChange={(v) => onChange({ ...element, sizeMm: v })} />
         </>
       )}
 
       {element.type === 'line' && (
         <div className="field-row">
-          <NumberField label="Länge (mm)" value={element.widthMm} min={1} onChange={(v) => onChange({ ...element, widthMm: v })} />
-          <NumberField label="Dicke (mm)" value={element.thicknessMm} min={0.1} onChange={(v) => onChange({ ...element, thicknessMm: v })} />
+          <NumberField label="Länge (mm)" value={element.widthMm} min={1} max={ELEMENT_LIMITS.lineWidthMm} onChange={(v) => onChange({ ...element, widthMm: v })} />
+          <NumberField label="Dicke (mm)" value={element.thicknessMm} min={0.1} max={ELEMENT_LIMITS.lineThicknessMm} onChange={(v) => onChange({ ...element, thicknessMm: v })} />
         </div>
       )}
     </aside>

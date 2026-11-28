@@ -276,6 +276,24 @@ describe('Label-Layouts API', () => {
     expect(png.width).toBeGreaterThan(100);
   });
 
+  it.each([
+    ['QR-Grösse', { type: 'qr', content: 'qr:personId', sizeMm: 201 }],
+    ['Logo-Höhe', { type: 'logo', logoId: 1, heightMm: 201 }],
+    ['Linien-Länge', { type: 'line', widthMm: 1001, thicknessMm: 1 }],
+    ['Linien-Dicke', { type: 'line', widthMm: 10, thicknessMm: 201 }],
+    ['Schriftgrösse', { type: 'static', value: 'x', fontSize: 2001, bold: false, align: 'left' }],
+  ])('lehnt eine übergrosse %s in der Vorschau mit verständlicher Meldung ab', async (name, element) => {
+    const media = await continuousMedia();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/label-layouts/preview',
+      headers: { cookie: sessionCookie, 'content-type': 'application/json' },
+      payload: { elements: [{ id: 'a', xMm: 0, yMm: 0, ...element }], mediaId: media.id },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain(name);
+  });
+
   async function continuousMedia(): Promise<{ id: number; vendor: keyof typeof VENDOR_DPI }> {
     const res = await app.inject({ method: 'GET', url: '/api/media-types', headers: { cookie: sessionCookie } });
     return res.json().find((m: { externalId: string }) => m.externalId === '62');

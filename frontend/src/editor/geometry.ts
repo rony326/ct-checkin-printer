@@ -15,6 +15,14 @@ export const AUTO_BOTTOM_MARGIN_MM = 2;
 export const MIN_LENGTH_MM = 10;
 /** Längstes Endlos-Etikett, fest oder automatisch (wie `MAX_CONTINUOUS_LENGTH_MM` im Renderer). */
 export const MAX_LENGTH_MM = 1000;
+/** Obergrenzen je Element, wie `ELEMENT_LIMITS` im Renderer. */
+export const ELEMENT_LIMITS = {
+  fontSize: 2000,
+  qrSizeMm: 200,
+  logoHeightMm: 200,
+  lineWidthMm: 1000,
+  lineThicknessMm: 200,
+} as const;
 /** Bis zu diesem Mass gilt ein Überstand als Rundungsrauschen. */
 const OVERFLOW_TOLERANCE_MM = 0.05;
 const MM_PER_INCH = 25.4;

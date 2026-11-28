@@ -27,6 +27,18 @@ const DEFAULT_BOTTOM_MARGIN_MM = 2;
 const MIN_CANVAS_HEIGHT_MM = 10;
 /** Obergrenze für Endlosetiketten, fest wie automatisch — ein Tippfehler in Y darf nicht meterweise Rolle verbrauchen. */
 export const MAX_CONTINUOUS_LENGTH_MM = 1000;
+/**
+ * Obergrenzen je Element, weit über allem, was auf ein Etikett passt. Ohne sie
+ * belegt z.B. ein QR-Code mit vertippter Grösse hunderte MB und blockiert den
+ * Dienst. Die API lehnt grössere Werte ab, der Renderer kappt bereits gespeicherte.
+ */
+export const ELEMENT_LIMITS = {
+  fontSize: 2000,
+  qrSizeMm: 200,
+  logoHeightMm: 200,
+  lineWidthMm: 1000,
+  lineThicknessMm: 200,
+} as const;
 const ROTATE_RADIANS: Record<'0' | '90' | '180' | '270', number> = { '0': 0, '90': Math.PI / 2, '180': Math.PI, '270': (3 * Math.PI) / 2 };
 export const FALLBACK_REGULAR_FAMILY = 'CtCheckinFallback';
 export const FALLBACK_BOLD_FAMILY = 'CtCheckinFallback-Bold';
@@ -230,12 +242,31 @@ function withRotation(canvasCtx: SKRSContext2D, anchorXPx: number, anchorYPx: nu
   canvasCtx.restore();
 }
 
+function limitElement(el: LabelElement): LabelElement {
+  switch (el.type) {
+    case 'text':
+    case 'static':
+      return { ...el, fontSize: Math.min(el.fontSize, ELEMENT_LIMITS.fontSize) };
+    case 'qr':
+      return { ...el, sizeMm: Math.min(el.sizeMm, ELEMENT_LIMITS.qrSizeMm) };
+    case 'logo':
+      return { ...el, heightMm: Math.min(el.heightMm, ELEMENT_LIMITS.logoHeightMm) };
+    case 'line':
+      return {
+        ...el,
+        widthMm: Math.min(el.widthMm, ELEMENT_LIMITS.lineWidthMm),
+        thicknessMm: Math.min(el.thicknessMm, ELEMENT_LIMITS.lineThicknessMm),
+      };
+  }
+}
+
 export async function renderLabel(
-  elements: LabelElement[],
+  storedElements: LabelElement[],
   media: MediaDefinition,
   context: RenderContext,
   options: RenderLabelOptions,
 ): Promise<RenderedBitmap> {
+  const elements = storedElements.map(limitElement);
   const { dpi, logos = {}, fonts = {}, bottomMarginMm = DEFAULT_BOTTOM_MARGIN_MM, lengthMm } = options;
 
   // Bei Die-Cut-Medien erwartet der Brother-Raster-Helper (`brother_ql.conversion.convert`)
