@@ -1,14 +1,14 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { PNG } from 'pngjs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { LabelElement } from '../db/schema.js';
 import type { MediaDefinition } from '../adapters/printer/types.js';
 import { computeQrHash } from '../template/qrHash.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BUNDLED_FONT_PATH = path.join(__dirname, '../../assets/fonts/DejaVuSans-Bold.ttf');
-import type { RenderContext } from '../template/variables.js';
+import { buildMockRenderContext, type RenderContext } from '../template/variables.js';
 import { renderLabel } from './LabelRenderer.js';
 import { BROTHER_MEDIA } from '../adapters/printer/media/brotherMedia.js';
 
@@ -188,6 +188,24 @@ describe('renderLabel — Zeichnen', () => {
     const bitmap = await renderLabel(elements, DIE_CUT_MEDIA, noCodeContext, { dpi: 300 });
     const png = decode(bitmap);
     expect(hasNonWhitePixel(png, 0, 0, 250, 250)).toBe(true);
+  });
+
+  // Diese Eingaben brachten den Dienst beim Etikettendruck mit einem Segfault zum Absturz.
+  it.each([
+    ['ein abgeschnittenes JPEG', Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0])],
+    ['ein WebP-Rumpf', Buffer.from('RIFFxxxxWEBP')],
+    ['kein Bild', Buffer.from('kaputt')],
+  ])('druckt das Etikett ohne Logo, wenn die Datei defekt ist: %s', async (_label, bytes) => {
+    const elements: LabelElement[] = [{ id: '1', type: 'logo', xMm: 5, yMm: 5, logoId: 1, heightMm: 10 }];
+    const media = BROTHER_MEDIA[0]!;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const broken = await renderLabel(elements, media, buildMockRenderContext(), { dpi: 300, logos: { 1: bytes } });
+    const empty = await renderLabel(elements, media, buildMockRenderContext(), { dpi: 300, logos: {} });
+
+    expect(broken.data.equals(empty.data)).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Logo 1'));
+    warn.mockRestore();
   });
 
   it('überspringt ein logo-Element, wenn keine Bilddaten übergeben wurden', async () => {

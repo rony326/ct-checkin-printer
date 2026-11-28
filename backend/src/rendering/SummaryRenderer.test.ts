@@ -337,8 +337,11 @@ describe('renderSummaryPdf', () => {
   it('embeds a valid JPEG logo once for all pages', async () => {
     const pdf = await renderSummaryPdf(pdfInput({ rows: manyRows(60), logo: jpegLogo() }));
 
+    const images = (buffer: Buffer) => buffer.toString('latin1').match(/\/Subtype \/Image/g)?.length ?? 0;
+    const single = await renderSummaryPdf(pdfInput({ logo: jpegLogo() }));
     expect(countPages(pdf)).toBeGreaterThan(1);
-    expect(pdf.toString('latin1').match(/\/DCTDecode/g)).toHaveLength(1);
+    expect(images(single)).toBeGreaterThan(0);
+    expect(images(pdf)).toBe(images(single));
   });
 
   // Diese Eingaben bringen den Bilddekoder von @napi-rs/canvas zum Absturz (Segfault, kein abfangbarer Fehler).

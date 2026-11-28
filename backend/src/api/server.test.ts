@@ -128,6 +128,21 @@ describe('Fonts API', () => {
 });
 
 describe('Logos API', () => {
+  it.each([
+    ['kaputt.png', Buffer.from('kein Bild')],
+    ['rumpf.jpg', Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0])],
+  ])('lehnt die defekte Datei %s beim Hochladen ab', async (filename, content) => {
+    const form = multipartRequest({ name: filename }, { field: 'file', filename, content, type: 'image/png' });
+    const { payload, contentType } = await formToInjectPayload(form);
+
+    const res = await app.inject({ method: 'POST', url: '/api/logos', headers: { cookie: sessionCookie, 'content-type': contentType }, payload });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('kein lesbares PNG- oder JPEG-Bild');
+    const list = await app.inject({ method: 'GET', url: '/api/logos', headers: { cookie: sessionCookie } });
+    expect(list.json().some((l: { name: string }) => l.name === filename)).toBe(false);
+  });
+
   it('lädt ein Logo hoch und listet es', async () => {
     const png = new PNG({ width: 4, height: 4 });
     const form = multipartRequest({ name: 'Gemeindelogo' }, { field: 'file', filename: 'logo.png', content: PNG.sync.write(png), type: 'image/png' });

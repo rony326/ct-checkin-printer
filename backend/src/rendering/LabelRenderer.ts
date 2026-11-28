@@ -7,6 +7,7 @@ import type { MediaDefinition, RenderedBitmap } from '../adapters/printer/types.
 import { resolveTextField, type RenderContext } from '../template/variables.js';
 import { computeQrHash } from '../template/qrHash.js';
 import { mmToPx } from './dimensions.js';
+import { decodeLogo } from './logoImage.js';
 
 /**
  * Zeichnet ein Etikett aus positionierten Elementen (siehe LabelElement in
@@ -174,7 +175,12 @@ async function drawLogo(canvasCtx: SKRSContext2D, el: Extract<LabelElement, { ty
   const bytes = logos[el.logoId];
   if (!bytes) return; // Logo nicht gefunden/nicht hochgeladen -> Block überspringen, wie v1 bei fehlender Datei
 
-  const img = await loadImage(bytes);
+  const img = decodeLogo(bytes);
+  if (!img) {
+    // Das Etikett ist wichtiger als das Logo.
+    console.warn(`Logo ${el.logoId} ist keine lesbare Bilddatei, das Etikett wird ohne Logo gedruckt.`);
+    return;
+  }
   const heightPx = mmToPx(el.heightMm, dpi);
   const widthPx = Math.round(heightPx * (img.width / img.height));
   const xPx = mmToPx(el.xMm, dpi);

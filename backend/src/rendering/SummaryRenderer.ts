@@ -1,6 +1,5 @@
 import { createCanvas, type SKRSContext2D } from '@napi-rs/canvas';
 import PDFDocument from 'pdfkit';
-import { PNG } from 'pngjs';
 import type { MediaDefinition, RenderedBitmap } from '../adapters/printer/types.js';
 import {
   ensureFallbackFontsRegistered,
@@ -10,6 +9,7 @@ import {
   FALLBACK_REGULAR_FONT_PATH,
 } from './LabelRenderer.js';
 import { mmToPx } from './dimensions.js';
+import { decodeLogo } from './logoImage.js';
 import type { SummaryDesign } from './summaryDesign.js';
 
 /**
@@ -125,9 +125,6 @@ const FOOTER_MAX_HEIGHT_SHARE = 0.15;
 const FOOTER_FONT_SIZE = 9;
 const MIN_HEADING_FONT_SIZE = 7;
 
-/** Grössere PNGs bräuchten beim Dekodieren Hunderte MB Arbeitsspeicher (Raspberry Pi). */
-const MAX_LOGO_PIXELS = 16_000_000;
-
 /**
  * Der Dateipfad dient direkt als Schriftname der normalen Schrift: Unter diesem Namen merkt sich pdfkit die beim
  * Anlegen geladene Schrift. Ein per `registerFont` vergebener Zweitname liesse die Datei bei jedem Schriftwechsel
@@ -135,8 +132,6 @@ const MAX_LOGO_PIXELS = 16_000_000;
  */
 const REGULAR = FALLBACK_REGULAR_FONT_PATH;
 const BOLD = 'bold';
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
-const JPEG_END = Buffer.from([0xff, 0xd9]);
 
 /** Von pdfkit geöffnetes Bild (in den Typdefinitionen nicht beschrieben). */
 interface PdfImage {
@@ -281,67 +276,19 @@ function measureHeading(doc: PDFKit.PDFDocument, text: string, fontSize: number,
 }
 
 /**
- * Prüft den Segmentaufbau eines JPEG: vollständige Segmente, ein Bildkopf (Baseline oder progressiv), Bilddaten und
- * Endmarke. So gelangt keine abgeschnittene Datei in den Druckauftrag; dekodiert wird das Bild erst im Drucker.
+ * Öffnet das Logo für pdfkit; `null` = ohne Logo drucken, die Liste ist wichtiger. pdfkit bekommt immer das aus den
+ * geprüften Pixeln neu geschriebene PNG, nie die hochgeladene Datei.
  */
-function isCompleteJpeg(data: Buffer): boolean {
-  if (data[0] !== 0xff || data[1] !== 0xd8) return false;
-  let hasFrame = false;
-  let pos = 2;
-  while (pos + 4 <= data.length && data[pos] === 0xff) {
-    const marker = data[pos + 1]!;
-    if (marker === 0xff) {
-      pos += 1; // Füllbyte
-      continue;
-    }
-    const length = data.readUInt16BE(pos + 2);
-    const end = pos + 2 + length;
-    if (length < 2 || end > data.length) return false;
-    if (marker >= 0xc0 && marker <= 0xc2) {
-      if (length < 8) return false;
-      const [bits, height, width, channels] = [data[pos + 4], data.readUInt16BE(pos + 5), data.readUInt16BE(pos + 7), data[pos + 9]!];
-      if (bits !== 8 || height === 0 || width === 0 || ![1, 3, 4].includes(channels) || length !== 8 + 3 * channels) return false;
-      hasFrame = true;
-    }
-    if (marker === 0xda) return hasFrame && data.includes(JPEG_END, end);
-    pos = end;
-  }
-  return false;
-}
-
-/** Vollständig dekodiert (wirft bei defekten Daten) und als sauberes, auf Druckgrösse verkleinertes PNG neu geschrieben. */
-function normalizePng(data: Buffer): Buffer | null {
-  // Breite und Höhe stehen im Bildkopf (IHDR), also vor dem Dekodieren prüfbar.
-  if (data.length < 24 || data.readUInt32BE(16) * data.readUInt32BE(20) > MAX_LOGO_PIXELS) return null;
-  const decoded = PNG.sync.read(data);
-  const source = createCanvas(decoded.width, decoded.height);
-  const pixels = source.getContext('2d').createImageData(decoded.width, decoded.height);
-  pixels.data.set(decoded.data);
-  source.getContext('2d').putImageData(pixels, 0, 0);
+function openLogo(doc: PDFKit.PDFDocument, logo: Buffer | undefined): { source: PdfImage; width: number; height: number } | null {
+  const decoded = logo ? decodeLogo(logo) : null;
+  if (!decoded) return null;
   // 4 Pixel je Punkt sind knapp 300 dpi — mehr Auflösung vergrössert nur den Druckauftrag.
   const scale = Math.min(1, (LOGO_MAX_HEIGHT * 4) / decoded.height);
   const canvas = createCanvas(Math.max(1, Math.round(decoded.width * scale)), Math.max(1, Math.round(decoded.height * scale)));
-  canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
-  return canvas.toBuffer('image/png');
-}
-
-/**
- * Öffnet das Logo für pdfkit; `null` = ohne Logo drucken, die Liste ist wichtiger. Die Bytes gehen nie an den
- * Bilddekoder von `@napi-rs/canvas` (Segfault bei defekten Dateien), und PNGs nur geprüft an pdfkit (das bei defekten
- * Bilddaten ausserhalb jedes try/catch wirft).
- */
-function openLogo(doc: PDFKit.PDFDocument, logo: Buffer | undefined): { source: PdfImage; width: number; height: number } | null {
-  if (!logo) return null;
-  try {
-    const data = logo.subarray(0, 4).equals(PNG_MAGIC) ? normalizePng(logo) : isCompleteJpeg(logo) ? logo : null;
-    if (!data) return null;
-    // Einmal geöffnet, bettet pdfkit das Bild nur einmal ein, auch wenn es auf jeder Seite steht.
-    const image = (doc as unknown as { openImage(source: Buffer): PdfImage }).openImage(data);
-    const rotated = (image.orientation ?? 1) > 4; // EXIF: um 90 Grad gedreht
-    return { source: image, width: rotated ? image.height : image.width, height: rotated ? image.width : image.height };
-  } catch {
-    return null;
-  }
+  canvas.getContext('2d').drawImage(decoded, 0, 0, canvas.width, canvas.height);
+  // Einmal geöffnet, bettet pdfkit das Bild nur einmal ein, auch wenn es auf jeder Seite steht.
+  const image = (doc as unknown as { openImage(source: Buffer): PdfImage }).openImage(canvas.toBuffer('image/png'));
+  return { source: image, width: image.width, height: image.height };
 }
 
 function formatDateTime(date: Date): string {

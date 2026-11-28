@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { requireAuth } from '../auth/routes.js';
 import { logos } from '../db/schema.js';
+import { decodeLogo } from '../rendering/logoImage.js';
 import { getUploadsDir } from '../storage/uploadsDir.js';
 
 const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg'];
@@ -24,9 +25,14 @@ export async function registerLogoRoutes(app: FastifyInstance) {
     }
 
     const name = (file.fields.name as { value?: string } | undefined)?.value || file.filename;
+    const content = await file.toBuffer();
+    if (!decodeLogo(content)) {
+      return reply.code(400).send({ error: 'Die Datei ist kein lesbares PNG- oder JPEG-Bild (höchstens 16 Megapixel).' });
+    }
+
     const storedFilename = `${randomUUID()}${ext}`;
     const dir = getUploadsDir(app.env.DB_PATH, 'logos');
-    await writeFile(path.join(dir, storedFilename), await file.toBuffer());
+    await writeFile(path.join(dir, storedFilename), content);
 
     const [row] = app.db.insert(logos).values({ name, filePath: storedFilename }).returning().all();
     return reply.code(201).send(row);
