@@ -27,6 +27,11 @@ Im Code gefundene Ursachen für (1):
 - **Falsche Schrift:** Der Editor zeichnet Standardtext in Work Sans, gedruckt
   wird DejaVu Sans (`FALLBACK_*_FONT_PATH`). Textbreiten weichen ab, das
   verschiebt zentrierten und rechtsbündigen Text.
+- **Linien zu tief:** Der Editor zentriert Linien in einem 8-px-Band, der
+  Renderer zeichnet sie ab dem Anker nach unten (bis ~1 mm Versatz).
+- **Logos quadratisch:** Gedruckt wird im Seitenverhältnis des Bildes, der
+  Editor zeigt einen quadratischen Platzhalter. Der Editor lädt künftig das
+  echte Logo (neue Route `GET /api/logos/:id/file`).
 - **Falscher Zeilenabstand:** Der Editor zeichnet mehrzeiligen Text mit Konvas
   Standard-`lineHeight` 1,0 (Trefferzone 1,2), der Renderer mit 1,3.
 
