@@ -5,8 +5,9 @@ import type { LabelElement } from '../types.js';
 import { DEFAULT_BOLD_FONT_FAMILY, DEFAULT_FONT_FAMILY } from './fontMetrics.js';
 import {
   LINE_HEIGHT_FACTOR,
-  dropAnchorMm,
+  exceedsDragThreshold,
   gridLinesMm,
+  releaseAnchorMm,
   snapAnchor,
   snapTargets,
   type BoxContext,
@@ -182,12 +183,17 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
         )
       : [];
     setCursor('grabbing');
+    // Ein Klick zum Auswählen darf nichts verschieben: erst ab der Schwelle wird gezogen, danach durchgehend.
+    let dragging = false;
 
     const onMove = (event: PointerEvent) => {
       const rect = stage.container().getBoundingClientRect();
+      const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      dragging ||= exceedsDragThreshold(pos, pointer);
+      if (!dragging) return;
       // Der Anker bleibt auf der Fläche.
-      const xPx = Math.min(Math.max(0, event.clientX - rect.left - offsetXPx), widthPx);
-      const yPx = Math.min(Math.max(0, event.clientY - rect.top - offsetYPx), heightPx);
+      const xPx = Math.min(Math.max(0, pointer.x - offsetXPx), widthPx);
+      const yPx = Math.min(Math.max(0, pointer.y - offsetYPx), heightPx);
       const anchor = { xMm: screenPxToMm(xPx), yMm: screenPxToMm(yPx) };
       const moving = { ...hitBox, x: hitBox.x + anchor.xMm - hit.xMm, y: hitBox.y + anchor.yMm - hit.yMm };
       // Alt gedrückt = frei ziehen.
@@ -201,12 +207,8 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
       setDragPreview(null);
       setCursor('grab');
       if (preview) {
-        const snapped = (axis: Guide['axis']) => preview.guides.some((guide) => guide.axis === axis);
-        onMoveElement(
-          preview.id,
-          snapped('x') ? preview.xMm : dropAnchorMm(preview.xMm, area.widthMm),
-          snapped('y') ? preview.yMm : dropAnchorMm(preview.yMm, area.heightMm),
-        );
+        const { xMm, yMm } = releaseAnchorMm(preview, area);
+        onMoveElement(preview.id, xMm, yMm);
       }
     };
     const detach = () => {

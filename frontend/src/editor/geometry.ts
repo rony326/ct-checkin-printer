@@ -170,6 +170,22 @@ export function snapAnchor(
   return result;
 }
 
+/** Ab diesem Abstand zum Greifpunkt gilt eine Zeigerbewegung als Ziehen, darunter als Zittern beim Klicken. */
+export const DRAG_THRESHOLD_PX = 4;
+
+export function exceedsDragThreshold(start: { x: number; y: number }, current: { x: number; y: number }): boolean {
+  return Math.hypot(current.x - start.x, current.y - start.y) >= DRAG_THRESHOLD_PX;
+}
+
+/** Anker beim Loslassen: eingerastete Achsen (siehe `snapAnchor`) bleiben, freie landen auf 0,5 mm. */
+export function releaseAnchorMm(preview: { xMm: number; yMm: number; guides: Guide[] }, area: PrintArea): { xMm: number; yMm: number } {
+  const snapped = (axis: Axis) => preview.guides.some((guide) => guide.axis === axis);
+  return {
+    xMm: snapped('x') ? preview.xMm : dropAnchorMm(preview.xMm, area.widthMm),
+    yMm: snapped('y') ? preview.yMm : dropAnchorMm(preview.yMm, area.heightMm),
+  };
+}
+
 /** Bildet einen zum Anker relativen Punkt gemäss Drehung ab (im Uhrzeigersinn, wie Konvas `rotation`-Prop). */
 export function rotateLocal(lx: number, ly: number, rotate: Rotate | undefined): { x: number; y: number } {
   switch (rotate) {

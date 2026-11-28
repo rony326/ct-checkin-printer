@@ -12,6 +12,9 @@ import {
   dropAnchorMm,
   rotateLocal,
   SNAP_THRESHOLD_MM,
+  DRAG_THRESHOLD_PX,
+  exceedsDragThreshold,
+  releaseAnchorMm,
   findSnap,
   roundMm,
   snapAnchor,
@@ -382,5 +385,33 @@ describe('snapAnchor', () => {
     const area: PrintArea = { ...SNAP_AREA, widthMm: 48.96 };
     const result = snapAnchor({ xMm: 48.5, yMm: 8 }, { x: 44.5, y: 8, width: 4, height: 2 }, snapTargets(area, [], null), area);
     expect(result.xMm).toBe(48.96);
+  });
+});
+
+describe('exceedsDragThreshold', () => {
+  const start = { x: 100, y: 50 };
+
+  it('ignoriert Zittern unter 4 px, auch schräg', () => {
+    expect(DRAG_THRESHOLD_PX).toBe(4);
+    for (const pos of [start, { x: 101, y: 50 }, { x: 103.9, y: 50 }, { x: 100, y: 46.1 }, { x: 102.8, y: 52.8 }]) {
+      expect(exceedsDragThreshold(start, pos)).toBe(false);
+    }
+  });
+
+  it('beginnt das Ziehen ab 4 px Abstand in jede Richtung', () => {
+    for (const pos of [{ x: 104, y: 50 }, { x: 96, y: 50 }, { x: 100, y: 54 }, { x: 103, y: 53 }]) {
+      expect(exceedsDragThreshold(start, pos)).toBe(true);
+    }
+  });
+});
+
+describe('releaseAnchorMm', () => {
+  it('rundet freie Achsen auf 0,5 mm und begrenzt sie auf die Fläche', () => {
+    expect(releaseAnchorMm({ xMm: 12.3, yMm: 29.9, guides: [] }, SNAP_AREA)).toEqual({ xMm: 12.5, yMm: 30 });
+  });
+
+  it('behält eingerastete Achsen unverändert', () => {
+    expect(releaseAnchorMm({ xMm: 9.4, yMm: 12.3, guides: [{ axis: 'x', valueMm: 25 }] }, SNAP_AREA)).toEqual({ xMm: 9.4, yMm: 12.5 });
+    expect(releaseAnchorMm({ xMm: 12.3, yMm: 21.9, guides: [{ axis: 'y', valueMm: 22.9 }] }, SNAP_AREA)).toEqual({ xMm: 12.5, yMm: 21.9 });
   });
 });
