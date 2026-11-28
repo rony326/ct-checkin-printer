@@ -133,8 +133,8 @@ interface Props {
   boxCtx: BoxContext;
   /** Geladene Logo-Bilder je logoId; fehlt eines, erscheint ein Platzhalter. */
   logoImages: Record<number, HTMLImageElement>;
-  /** Automatische Etikettenlänge bei Endlos ohne feste Länge, sonst `null`. */
-  autoLengthMm: number | null;
+  /** Linie am Etikettenende bei Endlos ohne feste Länge, sonst `null`. */
+  endLine: Guide | null;
   /** Anker→Grundlinie je Schriftfamilie als Anteil der Schriftgrösse. */
   baselineRatios: Record<string, number>;
   /** Raster anzeigen und Einrasten beim Ziehen. */
@@ -142,9 +142,11 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onMove: (id: string, xMm: number, yMm: number) => void;
+  /** Beginn und Ende eines Griffs; dazwischen soll `area` gleich bleiben. */
+  onDragChange: (active: boolean) => void;
 }
 
-export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm, baselineRatios, grid, selectedId, onSelect, onMove: onMoveElement }: Props) {
+export function Canvas({ area, boxes, elements, boxCtx, logoImages, endLine, baselineRatios, grid, selectedId, onSelect, onMove: onMoveElement, onDragChange }: Props) {
   const widthPx = mmToScreenPx(area.widthMm);
   const heightPx = mmToScreenPx(area.heightMm);
 
@@ -187,6 +189,7 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
         )
       : [];
     setCursor('grabbing');
+    onDragChange(true);
     // Ein Klick zum Auswählen darf nichts verschieben: erst ab der Schwelle wird gezogen, danach durchgehend.
     let dragging = false;
 
@@ -214,6 +217,7 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
         const { xMm, yMm } = releaseAnchorMm(preview, area);
         onMoveElement(preview.id, xMm, yMm);
       }
+      onDragChange(false);
     };
     const detach = () => {
       window.removeEventListener('pointermove', onMove);
@@ -236,10 +240,14 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
     setCursor(pickElementAt(elements, boxes, pos.x, pos.y) ? 'grab' : 'default');
   }
 
-  // Endet das Etikett am unteren Rand der Arbeitsfläche, bleibt die Linie innerhalb, und die
-  // Beschriftung steht unter dem Canvas, damit sie keinen Inhalt verdeckt.
-  const autoLengthPx = autoLengthMm !== null ? Math.min(mmToScreenPx(autoLengthMm), heightPx - 1) : null;
-  const endLabelBelow = autoLengthPx !== null && autoLengthPx + END_LABEL_SPACE_PX <= heightPx;
+  // Endet das Etikett am Rand der Arbeitsfläche, bleibt die Linie innerhalb.
+  const endPx = endLine
+    ? Math.min(Math.max(1, mmToScreenPx(endLine.valueMm)), (endLine.axis === 'x' ? widthPx : heightPx) - 1)
+    : null;
+  // Auf dem Canvas steht die Beschriftung nur unter einer Linie mit Platz darunter, sonst
+  // als Zeile unter dem Canvas, damit sie keinen Inhalt verdeckt.
+  const labelOnCanvas =
+    endPx !== null && endLine?.axis === 'y' && area.openEdge === 'bottom' && endPx + END_LABEL_SPACE_PX <= heightPx;
 
   const paper = (
     <div className="paper">
@@ -314,10 +322,10 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
             );
           })}
           {dragPreview?.guides.map((guide) => <AreaLine key={guide.axis} {...guide} area={area} color={GUIDE_COLOR} />)}
-          {autoLengthPx !== null && (
-            <Group y={autoLengthPx}>
-              <Line points={[0, 0, widthPx, 0]} stroke={END_COLOR} strokeWidth={1} dash={[6, 4]} />
-              {endLabelBelow && <Text x={4} y={3} text={END_LABEL} fontSize={10} fill={END_COLOR} />}
+          {endLine && endPx !== null && (
+            <Group x={endLine.axis === 'x' ? endPx : 0} y={endLine.axis === 'y' ? endPx : 0}>
+              <Line points={endLine.axis === 'x' ? [0, 0, 0, heightPx] : [0, 0, widthPx, 0]} stroke={END_COLOR} strokeWidth={1} dash={[6, 4]} />
+              {labelOnCanvas && <Text x={4} y={3} text={END_LABEL} fontSize={10} fill={END_COLOR} />}
             </Group>
           )}
         </Layer>
@@ -328,7 +336,7 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
   return (
     <>
       {paper}
-      {autoLengthPx !== null && !endLabelBelow && (
+      {endPx !== null && !labelOnCanvas && (
         <p style={{ color: END_COLOR, fontSize: 10, marginTop: 3 }}>{END_LABEL}</p>
       )}
     </>

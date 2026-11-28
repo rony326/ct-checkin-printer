@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LabelElement, Rotate } from '../types.js';
 import { elementBoxMm, type BoxContext, type BoxMm, type PrintArea } from './geometry.js';
-import { endLineMm, fromView, rotateArea, stepDeg, toView, type ViewDeg } from './viewRotation.js';
+import { endLineMm, fromView, replaceFromView, rotateArea, stepDeg, toView, type ViewDeg } from './viewRotation.js';
 
 const AREA: PrintArea = { widthMm: 50, heightMm: 30, continuous: false, fixedLength: false, openEdge: null };
 const DEGS: ViewDeg[] = ['0', '90', '180', '270'];
@@ -142,5 +142,64 @@ describe('stepDeg', () => {
     expect(stepDeg('0', -1)).toBe('270');
     expect(stepDeg('270', 1)).toBe('0');
     expect(stepDeg('180', -1)).toBe('90');
+  });
+});
+
+describe('replaceFromView', () => {
+  const elements: LabelElement[] = [
+    { id: 't', type: 'text', xMm: 12.3456, yMm: 7.0004, field: 'person.name', fontSize: 40, bold: false, align: 'left' },
+    { ...qr, rotate: '270' },
+    { id: 'n', type: 'line', xMm: 5, yMm: 4, widthMm: 30, thicknessMm: 1, rotate: '0' },
+  ];
+  const [text, code, line] = elements as [LabelElement, LabelElement, LabelElement];
+
+  it.each(DEGS)('lässt bei %s° ohne Änderung alles identisch', (deg) => {
+    for (const el of elements) {
+      expect(replaceFromView(elements, { ...toView(el, AREA, deg) }, AREA, deg)).toBe(elements);
+    }
+  });
+
+  it('wertet eine ausdrücklich gesetzte Drehung 0 wie eine fehlende', () => {
+    expect(replaceFromView(elements, { ...text, rotate: '0' }, AREA, '0')).toBe(elements);
+  });
+
+  it.each(DEGS)('ersetzt bei %s° nur das geänderte Element', (deg) => {
+    const shown = toView(code, AREA, deg);
+    const result = replaceFromView(elements, { ...shown, xMm: shown.xMm + 1 }, AREA, deg);
+    expect(result[0]).toBe(text);
+    expect(result[2]).toBe(line);
+    expect(result[1]).toEqual(fromView({ ...shown, xMm: shown.xMm + 1 }, AREA, deg));
+  });
+
+  it.each(DEGS)('ändert bei %s° mit einem anderen Feld weder Lage noch Drehung', (deg) => {
+    const result = replaceFromView(elements, { ...toView(text, AREA, deg), bold: true } as LabelElement, AREA, deg);
+    expect(JSON.stringify(result[0])).toBe(JSON.stringify({ ...text, bold: true }));
+  });
+
+  it('rechnet eine Verschiebung in der Ansicht auf die Druckachse zurück und lässt die andere unangetastet', () => {
+    const shown = toView(text, AREA, '90');
+    const [moved] = replaceFromView(elements, { ...shown, xMm: shown.xMm + 1 }, AREA, '90');
+    expect(moved!.xMm).toBe(12.3456);
+    expect(moved!.yMm).toBe(6);
+  });
+
+  it.each(DEGS)('ergibt bei %s° nach Verschieben und Zurückschieben wieder dasselbe', (deg) => {
+    for (const el of [code, line, qr]) {
+      const list = [el];
+      const shown = toView(el, AREA, deg);
+      const moved = replaceFromView(list, { ...shown, xMm: shown.xMm + 1, yMm: shown.yMm - 2 }, AREA, deg);
+      const back = toView(moved[0]!, AREA, deg);
+      const restored = replaceFromView(moved, { ...back, xMm: shown.xMm, yMm: shown.yMm }, AREA, deg);
+      expect(JSON.stringify(restored)).toBe(JSON.stringify(list));
+    }
+  });
+
+  it('speichert eine in der Ansicht gewählte Drehung als Druckwert', () => {
+    const result = replaceFromView(elements, { ...toView(text, AREA, '90'), rotate: '180' }, AREA, '90');
+    expect(result[0]!.rotate).toBe('90');
+  });
+
+  it('ignoriert ein unbekanntes Element', () => {
+    expect(replaceFromView(elements, { ...qr, id: 'weg' }, AREA, '90')).toBe(elements);
   });
 });

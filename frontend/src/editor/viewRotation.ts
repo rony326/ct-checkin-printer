@@ -81,3 +81,34 @@ export function endLineMm(lengthMm: number, printArea: PrintArea, deg: ViewDeg):
   const mirrored = deg === '90' || deg === '180';
   return { axis: isSideways(deg) ? 'x' : 'y', valueMm: mirrored ? printArea.heightMm - lengthMm : lengthMm };
 }
+
+/** Gleiche Felder mit gleichen Werten; eine fehlende Drehung zählt als 0°. */
+function isSameElement(a: LabelElement, b: LabelElement): boolean {
+  const left: Record<string, unknown> = { ...a, rotate: a.rotate ?? '0' };
+  const right: Record<string, unknown> = { ...b, rotate: b.rotate ?? '0' };
+  return Object.keys({ ...left, ...right }).every((key) => left[key] === right[key]);
+}
+
+/**
+ * Übernimmt ein in der Ansicht geändertes Element in die Druck-Elemente; alle
+ * anderen bleiben dieselben Objekte. Ohne Änderung kommt `elements` selbst
+ * zurück. Nicht veränderte Koordinaten behalten ihren gespeicherten Wert (ohne
+ * Rundung durch die Umrechnung), und ein fehlendes `rotate` bleibt bei 0° weg —
+ * so gilt ein Layout nach dem Zurücksetzen nicht als geändert.
+ * `printArea` muss die Fläche sein, mit der das Ansichtselement entstand.
+ */
+export function replaceFromView(elements: LabelElement[], changed: LabelElement, printArea: PrintArea, deg: ViewDeg): LabelElement[] {
+  const original = elements.find((el) => el.id === changed.id);
+  if (!original) return elements;
+  const shown = toView(original, printArea, deg);
+  if (isSameElement(changed, shown)) return elements;
+  const converted = fromView(changed, printArea, deg);
+  const untouched = fromView(shown, printArea, deg);
+  const next: LabelElement = {
+    ...converted,
+    xMm: converted.xMm === untouched.xMm ? original.xMm : converted.xMm,
+    yMm: converted.yMm === untouched.yMm ? original.yMm : converted.yMm,
+  };
+  if (original.rotate === undefined && next.rotate === '0') delete next.rotate;
+  return elements.map((el) => (el === original ? next : el));
+}

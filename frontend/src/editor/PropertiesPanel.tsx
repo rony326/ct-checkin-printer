@@ -1,21 +1,22 @@
-import type { ChangeEvent } from 'react';
+import { useState, type ChangeEvent } from 'react';
 import type { Align, FontEntry, LabelElement, LogoEntry, QrContentPath, Rotate, TextFieldPath, VariableDefs } from '../types.js';
 import { useFieldId } from '../components/useFieldId.js';
-import type { AlignCommand } from './geometry.js';
-import { ELEMENT_LIMITS } from './geometry.js';
+import { ELEMENT_LIMITS, parseLengthInput, type AlignCommand, type Edge } from './geometry.js';
 
 interface Props {
   element: LabelElement | null;
   variables: VariableDefs;
   fonts: FontEntry[];
   logos: LogoEntry[];
-  /** Endlosmaterial ohne feste Länge: senkrecht gibt es dann kein Mass zum Ausrichten. */
-  autoLength: boolean;
+  /** Offene Kante bei automatischer Länge: dorthin gibt es kein Mass zum Ausrichten. */
+  openEdge: Edge | null;
   onChange: (updated: LabelElement) => void;
   onAlign: (cmd: AlignCommand) => void;
   onDelete: () => void;
   onUploadFont: (file: File) => void;
   onUploadLogo: (file: File) => void;
+  /** Beginn und Ende des Tippens in X/Y; dazwischen soll der Bezugspunkt der Ansicht gleich bleiben. */
+  onPositionFocus: (focused: boolean) => void;
 }
 
 interface AlignButton {
@@ -41,15 +42,23 @@ const ALIGN_GROUPS = [
   { label: 'Senkrecht ausrichten', buttons: VERTICAL_BUTTONS },
 ];
 
+/** Befehle, die an der offenen Kante bzw. an der Mitte ihrer Achse ausrichten würden. */
+const BLOCKED_BY_OPEN_EDGE: Record<Edge, AlignCommand[]> = {
+  top: ['top', 'vcenter'],
+  bottom: ['bottom', 'vcenter'],
+  left: ['left', 'hcenter'],
+  right: ['right', 'hcenter'],
+};
+
 const NEEDS_LENGTH_HINT = 'Bei automatischer Länge nicht möglich – wähle eine feste Länge';
 
-function AlignButtons({ autoLength, onAlign }: { autoLength: boolean; onAlign: (cmd: AlignCommand) => void }) {
+function AlignButtons({ openEdge, onAlign }: { openEdge: Edge | null; onAlign: (cmd: AlignCommand) => void }) {
   return (
     <div className="align-buttons">
       {ALIGN_GROUPS.map((group) => (
         <div key={group.label} className="btn-row" role="group" aria-label={group.label}>
           {group.buttons.map(({ cmd, text, label }) => {
-            const disabled = autoLength && (cmd === 'vcenter' || cmd === 'bottom');
+            const disabled = openEdge !== null && BLOCKED_BY_OPEN_EDGE[openEdge].includes(cmd);
             return (
               <button
                 key={cmd}
@@ -80,7 +89,44 @@ function NumberField({ label, value, onChange, min, max, step }: { label: string
   );
 }
 
-export function PropertiesPanel({ element, variables, fonts, logos, autoLength, onChange, onAlign, onDelete, onUploadFont, onUploadLogo }: Props) {
+/** Abweichung, bis zu der ein Wert noch als der getippte gilt (Rundung der Ansichts-Umrechnung). */
+const TYPED_TOLERANCE_MM = 0.001;
+
+/**
+ * X bzw. Y in der Ansicht. Während des Tippens bleibt der getippte Text stehen:
+ * Der Wert läuft über die Druckkoordinaten und käme sonst gerundet zurück, und
+ * ein leeres Feld verschiebt nichts.
+ */
+function PositionField({ label, value, onChange, onFocusChange }: { label: string; value: number; onChange: (v: number) => void; onFocusChange: (focused: boolean) => void }) {
+  const fid = useFieldId();
+  const [draft, setDraft] = useState<string | null>(null);
+  const typed = draft === null ? null : parseLengthInput(draft);
+  // Wurde das Element anderweitig verschoben, gilt wieder der echte Wert.
+  const keepDraft = draft !== null && (typed === null || Math.abs(typed - value) <= TYPED_TOLERANCE_MM);
+  return (
+    <div className="field">
+      <label htmlFor={fid('f1')}>{label}</label>
+      <input
+        id={fid('f1')}
+        type="number"
+        step={0.1}
+        value={keepDraft ? draft : value}
+        onFocus={() => onFocusChange(true)}
+        onBlur={() => {
+          setDraft(null);
+          onFocusChange(false);
+        }}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          const next = parseLengthInput(e.target.value);
+          if (next !== null) onChange(next);
+        }}
+      />
+    </div>
+  );
+}
+
+export function PropertiesPanel({ element, variables, fonts, logos, openEdge, onChange, onAlign, onDelete, onUploadFont, onUploadLogo, onPositionFocus }: Props) {
   const fid = useFieldId();
   if (!element) {
     return (
@@ -92,8 +138,8 @@ export function PropertiesPanel({ element, variables, fonts, logos, autoLength, 
 
   const positionFields = (
     <div className="field-row">
-      <NumberField label="X (mm)" step={0.1} value={element.xMm} onChange={(v) => onChange({ ...element, xMm: v })} />
-      <NumberField label="Y (mm)" step={0.1} value={element.yMm} onChange={(v) => onChange({ ...element, yMm: v })} />
+      <PositionField key={`x-${element.id}`} label="X (mm)" value={element.xMm} onChange={(v) => onChange({ ...element, xMm: v })} onFocusChange={onPositionFocus} />
+      <PositionField key={`y-${element.id}`} label="Y (mm)" value={element.yMm} onChange={(v) => onChange({ ...element, yMm: v })} onFocusChange={onPositionFocus} />
     </div>
   );
 
@@ -118,7 +164,7 @@ export function PropertiesPanel({ element, variables, fonts, logos, autoLength, 
         </button>
       </div>
 
-      <AlignButtons autoLength={autoLength} onAlign={onAlign} />
+      <AlignButtons openEdge={openEdge} onAlign={onAlign} />
       {positionFields}
       {rotateField}
 

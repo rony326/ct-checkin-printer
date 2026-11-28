@@ -22,7 +22,11 @@ import { GridControls } from '../editor/GridControls.js';
 import { useGridSettings } from '../editor/gridSettings.js';
 import { LengthControls } from '../editor/LengthControls.js';
 import { PropertiesPanel, elementTypeLabel } from '../editor/PropertiesPanel.js';
+import { RotatedImage } from '../editor/RotatedImage.js';
 import { Toolbar } from '../editor/Toolbar.js';
+import { ViewControls } from '../editor/ViewControls.js';
+import { endLineMm, replaceFromView, rotateArea, toView, fromView } from '../editor/viewRotation.js';
+import { useViewDeg } from '../editor/viewSettings.js';
 import type { FontEntry, LabelElement, LabelElementType, LabelLayout, LogoEntry, MediaType, VariableDefs } from '../types.js';
 import { VENDOR_DPI } from '../types.js';
 import { useFieldId } from '../components/useFieldId.js';
@@ -60,7 +64,8 @@ const DEFAULT_ELEMENT_BY_TYPE: Record<LabelElementType, (id: string) => LabelEle
 const EMPTY_VARIABLES: VariableDefs = { textFields: [], qrContents: [] };
 
 function snapshotOf(elements: LabelElement[], mediaId: number | null, lengthMm: number | null): string {
-  return JSON.stringify({ elements, mediaId, lengthMm });
+  // Eine ausdrückliche Drehung 0 ist dasselbe wie keine.
+  return JSON.stringify({ elements, mediaId, lengthMm }, (key, value: unknown) => (key === 'rotate' && value === '0' ? undefined : value));
 }
 
 /** Arbeitsfläche, solange kein Medium bekannt ist. */
@@ -205,6 +210,13 @@ export function LayoutEditor() {
   const { fontsVersion, baselineRatios, loadedFamilies } = useFontFaces(fonts);
   const logoImages = useLogoImages(elements, logos);
   const [gridSettings, setGridSettings] = useGridSettings();
+  const [viewDeg, setViewDeg] = useViewDeg(id);
+  /**
+   * Festgehaltene Druckfläche während eines Griffs bzw. beim Tippen in X/Y. Nötig, wenn die
+   * offene Kante links oder oben liegt: Dort verschiebt eine neue Arbeitslänge den Bezugspunkt.
+   */
+  const [dragArea, setDragArea] = useState<PrintArea | null>(null);
+  const [inputArea, setInputArea] = useState<PrintArea | null>(null);
 
   async function loadAll() {
     let results;
@@ -266,7 +278,16 @@ export function LayoutEditor() {
     () => (media ? printAreaMm(media, lengthMm, contentLengthMm) : FALLBACK_AREA),
     [media, lengthMm, contentLengthMm],
   );
-  const autoLength = area.continuous && !area.fixedLength;
+  /** Druckfläche, mit der zwischen Druck und Ansicht umgerechnet wird. */
+  const printBase = dragArea ?? inputArea ?? area;
+  const viewArea = useMemo(() => rotateArea(printBase, viewDeg), [printBase, viewDeg]);
+  const viewElements = useMemo(() => elements.map((el) => toView(el, printBase, viewDeg)), [elements, printBase, viewDeg]);
+  const viewBoxes = useMemo<BoxMm[]>(() => viewElements.map((el) => elementBoxMm(el, boxCtx)), [viewElements, boxCtx]);
+  const selectedViewElement = viewElements.find((el) => el.id === selectedId) ?? null;
+  const originCanShift = viewArea.openEdge === 'left' || viewArea.openEdge === 'top';
+
+  // Verschwindet ein fokussiertes Feld, bleibt sein Verlassen-Ereignis aus.
+  useEffect(() => setInputArea(null), [selectedId, viewDeg, mediaId, lengthMm]);
   const overflowLabels = useMemo(() => {
     const ids = new Set(overflowingElementIds(elements, boxes, area));
     return elements.filter((el) => ids.has(el.id)).map((el) => elementTypeLabel(el.type));
@@ -301,16 +322,19 @@ export function LayoutEditor() {
       if (!move) return;
       event.preventDefault();
       // Gleiche Grenzen wie beim Ziehen (siehe Canvas): der Anker bleibt auf der Fläche.
-      const maxX = area.widthMm;
-      const maxY = area.heightMm;
       const clamp = (v: number, max: number) => Math.min(Math.max(0, v), max);
-      setElements((prev) =>
-        prev.map((el) => (el.id === selectedId ? { ...el, xMm: clamp(el.xMm + move[0], maxX), yMm: clamp(el.yMm + move[1], maxY) } : el)),
-      );
+      const { widthMm, heightMm } = rotateArea(printBase, viewDeg);
+      setElements((prev) => {
+        const current = prev.find((el) => el.id === selectedId);
+        if (!current) return prev;
+        const shown = toView(current, printBase, viewDeg);
+        const moved = { ...shown, xMm: clamp(shown.xMm + move[0], widthMm), yMm: clamp(shown.yMm + move[1], heightMm) };
+        return replaceFromView(prev, moved, printBase, viewDeg);
+      });
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedId, area]);
+  }, [selectedId, printBase, viewDeg]);
 
   // Live-Vorschau: echter Server-Renderer, debounced bei jeder Änderung.
   useEffect(() => {
@@ -340,13 +364,20 @@ export function LayoutEditor() {
   }, []);
 
   function addElement(type: LabelElementType) {
-    const newElement = DEFAULT_ELEMENT_BY_TYPE[type](generateElementId());
+    // Die Standardwerte gelten für die Ansicht: aufrecht oben links, wie man das Etikett sieht.
+    const newElement = fromView(DEFAULT_ELEMENT_BY_TYPE[type](generateElementId()), printBase, viewDeg);
     setElements((prev) => [...prev, newElement]);
     setSelectedId(newElement.id);
   }
 
+  /** Ersetzt ein Element durch einen Stand in Druckkoordinaten. */
   function updateElement(updated: LabelElement) {
     setElements((prev) => prev.map((el) => (el.id === updated.id ? updated : el)));
+  }
+
+  /** Übernimmt ein in der Ansicht geändertes Element. */
+  function updateViewElement(changed: LabelElement) {
+    setElements((prev) => replaceFromView(prev, changed, printBase, viewDeg));
   }
 
   function deleteElement(elId: string) {
@@ -354,14 +385,18 @@ export function LayoutEditor() {
     if (selectedId === elId) setSelectedId(null);
   }
 
+  // Der Canvas ruft die Funktion vom Beginn des Griffs auf; ihre Fläche passt damit zu den Koordinaten.
   function moveElement(elId: string, xMm: number, yMm: number) {
-    setElements((prev) => prev.map((el) => (el.id === elId ? { ...el, xMm, yMm } : el)));
+    setElements((prev) => {
+      const current = prev.find((el) => el.id === elId);
+      return current ? replaceFromView(prev, { ...toView(current, printBase, viewDeg), xMm, yMm }, printBase, viewDeg) : prev;
+    });
   }
 
   function alignSelected(cmd: AlignCommand) {
-    const index = elements.findIndex((el) => el.id === selectedId);
+    const index = viewElements.findIndex((el) => el.id === selectedId);
     if (index < 0) return;
-    updateElement(alignElement(elements[index]!, cmd, area, boxes[index]!));
+    updateViewElement(alignElement(viewElements[index]!, cmd, viewArea, viewBoxes[index]!));
   }
 
   async function handleSave() {
@@ -482,18 +517,20 @@ export function LayoutEditor() {
               )}
               {media && !media.dieCut && <LengthControls lengthMm={lengthMm} contentLengthMm={contentLengthMm} onChange={setLengthMm} />}
               <GridControls settings={gridSettings} onChange={setGridSettings} />
+              <ViewControls deg={viewDeg} onChange={setViewDeg} />
               <Canvas
-                area={area}
-                boxes={boxes}
-                elements={elements}
+                area={viewArea}
+                boxes={viewBoxes}
+                elements={viewElements}
                 boxCtx={boxCtx}
                 logoImages={logoImages}
-                autoLengthMm={autoLength ? contentLengthMm : null}
+                endLine={printBase.openEdge !== null ? endLineMm(contentLengthMm, printBase, viewDeg) : null}
                 baselineRatios={baselineRatios}
                 grid={gridSettings}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 onMove={moveElement}
+                onDragChange={(active) => setDragArea(active && originCanShift ? printBase : null)}
               />
             </div>
 
@@ -503,6 +540,8 @@ export function LayoutEditor() {
               </p>
               {previewError ? (
                 <p className="error-text">{previewError}</p>
+              ) : previewUrl && viewDeg !== '0' ? (
+                <RotatedImage src={previewUrl} deg={viewDeg} alt="Etiketten-Vorschau" />
               ) : previewUrl ? (
                 <img src={previewUrl} alt="Etiketten-Vorschau" className="paper" style={{ maxWidth: 'min(320px, 100%)' }} />
               ) : (
@@ -512,16 +551,17 @@ export function LayoutEditor() {
           </div>
 
           <PropertiesPanel
-            element={selectedElement}
+            element={selectedViewElement}
             variables={variables}
             fonts={fonts}
             logos={logos}
-            autoLength={autoLength}
-            onChange={updateElement}
+            openEdge={viewArea.openEdge}
+            onChange={updateViewElement}
             onAlign={alignSelected}
             onDelete={() => selectedId && deleteElement(selectedId)}
             onUploadFont={handleUploadFont}
             onUploadLogo={handleUploadLogo}
+            onPositionFocus={(focused) => setInputArea(focused && originCanShift ? printBase : null)}
           />
         </div>
       )}
