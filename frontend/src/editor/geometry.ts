@@ -13,6 +13,8 @@ export const DEFAULT_CONTINUOUS_HEIGHT_MM = 120;
 export const AUTO_BOTTOM_MARGIN_MM = 2;
 /** Kürzestes Endlos-Etikett. */
 export const MIN_LENGTH_MM = 10;
+/** Längste feste Länge, die die API annimmt. */
+export const MAX_LENGTH_MM = 1000;
 /** Bis zu diesem Mass gilt ein Überstand als Rundungsrauschen. */
 const OVERFLOW_TOLERANCE_MM = 0.05;
 const MM_PER_INCH = 25.4;
@@ -46,17 +48,32 @@ export interface BoxContext {
   logoAspect(logoId: number): number | undefined;
 }
 
+/** Begrenzt eine feste Länge auf den erlaubten Bereich. */
+export function clampLengthMm(lengthMm: number): number {
+  return Math.min(Math.max(lengthMm, MIN_LENGTH_MM), MAX_LENGTH_MM);
+}
+
+/** Inhalt des Längen-Felds als Zahl; `null`, solange er leer oder keine Zahl ist. */
+export function parseLengthInput(text: string): number | null {
+  const value = Number(text);
+  return text.trim() !== '' && Number.isFinite(value) ? value : null;
+}
+
 /**
  * Die-Cut: die bedruckbare Fläche. Endlos: nominale Breite (wie im Renderer)
- * und die feste Länge, ohne diese nur eine Arbeitsfläche.
+ * und die feste Länge, ohne diese nur eine Arbeitsfläche, die mit dem Inhalt
+ * (`contentLengthMm`) mitwächst.
  */
-export function printAreaMm(media: MediaType, lengthMm: number | null): PrintArea {
+export function printAreaMm(media: MediaType, lengthMm: number | null, contentLengthMm = 0): PrintArea {
   if (media.dieCut) {
     // Die-Cut-Medien haben immer eine Höhe; die Rückfälle bedienen nur den Typ.
     const heightMm = media.printableHeightMm ?? media.heightMm ?? DEFAULT_CONTINUOUS_HEIGHT_MM;
     return { widthMm: media.printableWidthMm, heightMm, continuous: false, fixedLength: false };
   }
-  if (lengthMm === null) return { widthMm: media.widthMm, heightMm: DEFAULT_CONTINUOUS_HEIGHT_MM, continuous: true, fixedLength: false };
+  if (lengthMm === null) {
+    const heightMm = Math.max(DEFAULT_CONTINUOUS_HEIGHT_MM, Math.ceil(contentLengthMm));
+    return { widthMm: media.widthMm, heightMm, continuous: true, fixedLength: false };
+  }
   // Der Renderer druckt nie kürzer als MIN_LENGTH_MM.
   return { widthMm: media.widthMm, heightMm: Math.max(lengthMm, MIN_LENGTH_MM), continuous: true, fixedLength: true };
 }

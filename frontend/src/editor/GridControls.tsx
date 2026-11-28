@@ -9,7 +9,7 @@ interface Props {
 export function GridControls({ settings, onChange }: Props) {
   const fid = useFieldId();
   return (
-    <div className="grid-controls">
+    <div className="stage-controls">
       <label className="checkbox-field" htmlFor={fid('show')}>
         <input id={fid('show')} type="checkbox" checked={settings.showGrid} onChange={(e) => onChange({ ...settings, showGrid: e.target.checked })} />
         Raster

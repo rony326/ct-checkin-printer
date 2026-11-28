@@ -25,6 +25,10 @@ const MIN_HIT_SIZE_MM = 2;
 // Konva zeichnet auf Canvas, CSS-Variablen wirken dort nicht — deshalb feste Farbwerte.
 const GRID_COLOR = '#e4e1da';
 const GUIDE_COLOR = '#2b6e63';
+/** Platz, den die Beschriftung unter der automatischen Endlinie auf dem Canvas braucht. */
+const END_LABEL_SPACE_PX = 13;
+const END_COLOR = '#b0573c';
+const END_LABEL = 'Etikett endet hier (automatisch)';
 
 /** Laufende Position beim Ziehen: eingerastete Achsen (siehe `guides`) sind gerundet, freie noch nicht. */
 interface DragPreview {
@@ -232,9 +236,12 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
     setCursor(pickElementAt(elements, boxes, pos.x, pos.y) ? 'grab' : 'default');
   }
 
-  const autoLengthPx = autoLengthMm !== null ? mmToScreenPx(autoLengthMm) : null;
+  // Endet das Etikett am unteren Rand der Arbeitsfläche, bleibt die Linie innerhalb, und die
+  // Beschriftung steht unter dem Canvas, damit sie keinen Inhalt verdeckt.
+  const autoLengthPx = autoLengthMm !== null ? Math.min(mmToScreenPx(autoLengthMm), heightPx - 1) : null;
+  const endLabelBelow = autoLengthPx !== null && autoLengthPx + END_LABEL_SPACE_PX <= heightPx;
 
-  return (
+  const paper = (
     <div className="paper">
       <Stage ref={stageRef} width={Math.ceil(widthPx)} height={Math.ceil(heightPx)} onPointerDown={handlePointerDown} onPointerMove={handleHover}>
         <Layer listening={false}>
@@ -307,14 +314,23 @@ export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm
             );
           })}
           {dragPreview?.guides.map((guide) => <AreaLine key={guide.axis} {...guide} area={area} color={GUIDE_COLOR} />)}
-          {autoLengthPx !== null && autoLengthPx <= heightPx && (
+          {autoLengthPx !== null && (
             <Group y={autoLengthPx}>
-              <Line points={[0, 0, widthPx, 0]} stroke="#b0573c" strokeWidth={1} dash={[6, 4]} />
-              <Text x={4} y={3} text="Etikett endet hier (automatisch)" fontSize={10} fill="#b0573c" />
+              <Line points={[0, 0, widthPx, 0]} stroke={END_COLOR} strokeWidth={1} dash={[6, 4]} />
+              {endLabelBelow && <Text x={4} y={3} text={END_LABEL} fontSize={10} fill={END_COLOR} />}
             </Group>
           )}
         </Layer>
       </Stage>
     </div>
+  );
+
+  return (
+    <>
+      {paper}
+      {autoLengthPx !== null && !endLabelBelow && (
+        <p style={{ color: END_COLOR, fontSize: 10, marginTop: 3 }}>{END_LABEL}</p>
+      )}
+    </>
   );
 }

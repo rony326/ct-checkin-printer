@@ -5,6 +5,7 @@ import { Canvas, cssFont } from '../editor/Canvas.js';
 import {
   DEFAULT_CONTINUOUS_HEIGHT_MM,
   alignElement,
+  clampLengthMm,
   elementBoxMm,
   estimateContentLengthMm,
   overflowingElementIds,
@@ -19,6 +20,7 @@ import {
 import { DEFAULT_BOLD_FONT_FAMILY, DEFAULT_FONT_FAMILY, editorFontFamily, topBaselineRatio } from '../editor/fontMetrics.js';
 import { GridControls } from '../editor/GridControls.js';
 import { useGridSettings } from '../editor/gridSettings.js';
+import { LengthControls } from '../editor/LengthControls.js';
 import { PropertiesPanel, elementTypeLabel } from '../editor/PropertiesPanel.js';
 import { Toolbar } from '../editor/Toolbar.js';
 import type { FontEntry, LabelElement, LabelElementType, LabelLayout, LogoEntry, MediaType, VariableDefs } from '../types.js';
@@ -57,8 +59,8 @@ const DEFAULT_ELEMENT_BY_TYPE: Record<LabelElementType, (id: string) => LabelEle
 
 const EMPTY_VARIABLES: VariableDefs = { textFields: [], qrContents: [] };
 
-function snapshotOf(elements: LabelElement[], mediaId: number | null): string {
-  return JSON.stringify({ elements, mediaId });
+function snapshotOf(elements: LabelElement[], mediaId: number | null, lengthMm: number | null): string {
+  return JSON.stringify({ elements, mediaId, lengthMm });
 }
 
 /** Arbeitsfläche, solange kein Medium bekannt ist. */
@@ -178,6 +180,8 @@ export function LayoutEditor() {
   const [layout, setLayout] = useState<LabelLayout | null>(null);
   const [elements, setElements] = useState<LabelElement[]>([]);
   const [mediaId, setMediaId] = useState<number | null>(null);
+  /** Feste Länge bei Endlosmedien, `null` = automatisch. Bei Die-Cut ohne Wirkung. */
+  const [lengthMm, setLengthMm] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mediaTypes, setMediaTypes] = useState<MediaType[]>([]);
   const [fonts, setFonts] = useState<FontEntry[]>([]);
@@ -212,10 +216,13 @@ export function LayoutEditor() {
     }
     const [layoutRes, mediaRes, fontsRes, logosRes, variablesRes] = results;
     setLoadError(null);
-    setSavedSnapshot(snapshotOf(layoutRes.elementsJson, layoutRes.mediaId));
+    // Die API erlaubt auch kürzere Werte; gedruckt wird ohnehin mindestens die Mindestlänge.
+    const loadedLengthMm = layoutRes.lengthMm === null ? null : clampLengthMm(layoutRes.lengthMm);
+    setSavedSnapshot(snapshotOf(layoutRes.elementsJson, layoutRes.mediaId, loadedLengthMm));
     setLayout(layoutRes);
     setElements(layoutRes.elementsJson);
     setMediaId(layoutRes.mediaId);
+    setLengthMm(loadedLengthMm);
     setMediaTypes(mediaRes);
     setFonts(fontsRes);
     setLogos(logosRes);
@@ -228,9 +235,6 @@ export function LayoutEditor() {
 
   const media = useMemo(() => mediaTypes.find((m) => m.id === mediaId) ?? null, [mediaTypes, mediaId]);
   const selectedElement = useMemo(() => elements.find((el) => el.id === selectedId) ?? null, [elements, selectedId]);
-  const lengthMm = layout?.lengthMm ?? null;
-  const area = useMemo(() => (media ? printAreaMm(media, lengthMm) : FALLBACK_AREA), [media, lengthMm]);
-
   // Neu nach jedem Schriften-Laden, damit alle abhängigen Kästen neu gemessen werden.
   const measure = useMemo(() => createMeasure(), [fontsVersion]);
   const boxCtx = useMemo<BoxContext>(
@@ -248,19 +252,21 @@ export function LayoutEditor() {
   );
   const boxes = useMemo<BoxMm[]>(() => elements.map((el) => elementBoxMm(el, boxCtx)), [elements, boxCtx]);
   // Der Renderer ignoriert bei der automatischen Länge die Drehung.
-  const autoLengthMm = useMemo(
-    () =>
-      area.continuous && !area.fixedLength
-        ? estimateContentLengthMm(elements.map((el) => elementBoxMm({ ...el, rotate: '0' }, boxCtx)))
-        : null,
-    [area, elements, boxCtx],
+  const contentLengthMm = useMemo(
+    () => estimateContentLengthMm(elements.map((el) => elementBoxMm({ ...el, rotate: '0' }, boxCtx))),
+    [elements, boxCtx],
   );
+  const area = useMemo(
+    () => (media ? printAreaMm(media, lengthMm, contentLengthMm) : FALLBACK_AREA),
+    [media, lengthMm, contentLengthMm],
+  );
+  const autoLength = area.continuous && !area.fixedLength;
   const overflowLabels = useMemo(() => {
     const ids = new Set(overflowingElementIds(elements, boxes, area));
     return elements.filter((el) => ids.has(el.id)).map((el) => elementTypeLabel(el.type));
   }, [elements, boxes, area]);
 
-  const isDirty = savedSnapshot !== null && snapshotOf(elements, mediaId) !== savedSnapshot;
+  const isDirty = savedSnapshot !== null && snapshotOf(elements, mediaId, lengthMm) !== savedSnapshot;
 
   // Ein altes „Gespeichert." darf nach weiteren Änderungen nicht stehen bleiben.
   useEffect(() => {
@@ -356,8 +362,8 @@ export function LayoutEditor() {
     setSaving(true);
     setSaveMessage(null);
     try {
-      await api.put(`/api/label-layouts/${id}`, { elementsJson: elements, mediaId: mediaId ?? undefined });
-      setSavedSnapshot(snapshotOf(elements, mediaId));
+      await api.put(`/api/label-layouts/${id}`, { elementsJson: elements, mediaId: mediaId ?? undefined, lengthMm });
+      setSavedSnapshot(snapshotOf(elements, mediaId, lengthMm));
       setSaveMessage({ text: 'Gespeichert.', isError: false });
     } catch (err) {
       setSaveMessage({ text: err instanceof Error ? err.message : 'Speichern fehlgeschlagen', isError: true });
@@ -469,6 +475,7 @@ export function LayoutEditor() {
                   Ragt über das Etikett hinaus und wird abgeschnitten: {overflowLabels.join(', ')}
                 </p>
               )}
+              {media && !media.dieCut && <LengthControls lengthMm={lengthMm} contentLengthMm={contentLengthMm} onChange={setLengthMm} />}
               <GridControls settings={gridSettings} onChange={setGridSettings} />
               <Canvas
                 area={area}
@@ -476,7 +483,7 @@ export function LayoutEditor() {
                 elements={elements}
                 boxCtx={boxCtx}
                 logoImages={logoImages}
-                autoLengthMm={autoLengthMm}
+                autoLengthMm={autoLength ? contentLengthMm : null}
                 baselineRatios={baselineRatios}
                 grid={gridSettings}
                 selectedId={selectedId}
@@ -504,7 +511,7 @@ export function LayoutEditor() {
             variables={variables}
             fonts={fonts}
             logos={logos}
-            autoLength={area.continuous && !area.fixedLength}
+            autoLength={autoLength}
             onChange={updateElement}
             onAlign={alignSelected}
             onDelete={() => selectedId && deleteElement(selectedId)}

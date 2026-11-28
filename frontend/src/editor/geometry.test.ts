@@ -5,7 +5,10 @@ import {
   alignElement,
   DEFAULT_CONTINUOUS_HEIGHT_MM,
   LINE_HEIGHT_FACTOR,
+  MAX_LENGTH_MM,
   MIN_LENGTH_MM,
+  clampLengthMm,
+  parseLengthInput,
   elementBoxMm,
   estimateContentLengthMm,
   overflowingElementIds,
@@ -70,6 +73,7 @@ describe('Konstanten', () => {
     expect(DEFAULT_CONTINUOUS_HEIGHT_MM).toBe(120);
     expect(AUTO_BOTTOM_MARGIN_MM).toBe(2);
     expect(MIN_LENGTH_MM).toBe(10);
+    expect(MAX_LENGTH_MM).toBe(1000);
   });
 });
 
@@ -92,6 +96,37 @@ describe('printAreaMm', () => {
 
   it('hebt eine zu kurze feste Länge auf die Mindestlänge an, wie der Renderer', () => {
     expect(printAreaMm(continuousMedia, 4)).toEqual({ widthMm: 62, heightMm: 10, continuous: true, fixedLength: true });
+  });
+
+  it('lässt die Arbeitsfläche mit längerem Inhalt mitwachsen (aufgerundet)', () => {
+    expect(printAreaMm(continuousMedia, null, 150.2).heightMm).toBe(151);
+    expect(printAreaMm(continuousMedia, null, 80).heightMm).toBe(120);
+  });
+
+  it('beachtet die Inhaltslänge weder bei fester Länge noch bei Die-Cut', () => {
+    expect(printAreaMm(continuousMedia, 80, 150).heightMm).toBe(80);
+    expect(printAreaMm(dieCutMedia, null, 150).heightMm).toBe(22.9);
+  });
+});
+
+describe('parseLengthInput', () => {
+  it('liest eine Zahl', () => {
+    expect(parseLengthInput('80')).toBe(80);
+    expect(parseLengthInput('80.5')).toBe(80.5);
+    expect(parseLengthInput('4')).toBe(4);
+  });
+
+  it.each(['', '  ', 'abc', 'Infinity', 'NaN'])('liefert für „%s" null', (text) => {
+    expect(parseLengthInput(text)).toBeNull();
+  });
+});
+
+describe('clampLengthMm', () => {
+  it('begrenzt auf 10 bis 1000 mm', () => {
+    expect(clampLengthMm(-5)).toBe(10);
+    expect(clampLengthMm(0)).toBe(10);
+    expect(clampLengthMm(80.5)).toBe(80.5);
+    expect(clampLengthMm(4000)).toBe(1000);
   });
 });
 
