@@ -1,57 +1,50 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Group, Layer, Rect, Stage, Text } from 'react-konva';
+import { useEffect, useRef, useState } from 'react';
+import { Group, Image as KonvaImage, Layer, Line, Rect, Shape, Stage, Text } from 'react-konva';
 import type Konva from 'konva';
-import type { Align, LabelElement, MediaType, VariableDefs } from '../types.js';
-import { VENDOR_DPI } from '../types.js';
-import { DEFAULT_CONTINUOUS_HEIGHT_MM, rotateLocal } from './geometry.js';
+import type { LabelElement } from '../types.js';
+import { LINE_HEIGHT_FACTOR, type BoxContext, type BoxMm, type PrintArea, type TextLikeElement } from './geometry.js';
 
 /** Reiner Bildschirm-Massstab fürs interaktive Editieren, unabhängig von der Druck-DPI. */
 export const SCREEN_PX_PER_MM = 4;
-/** Grobe Zeilenhöhe für die Klick-Trefferzone von Text — Konvas eigene Text-Metrik ist hier nicht nötig, siehe `computeBoxes`. */
-const TEXT_LINE_HEIGHT_FACTOR = 1.2;
+/** Kleinere Kästen werden für die Treffererkennung auf dieses Mass gepolstert, damit dünne Linien greifbar bleiben. */
+const MIN_HIT_SIZE_MM = 2;
+/** Frei gezogene Elemente landen auf diesem Raster. */
+const DRAG_ROUNDING_MM = 0.5;
+/** Familien der mitgelieferten Druckschrift (DejaVu Sans), siehe `useFontFaces` im LayoutEditor. */
+export const DEFAULT_FONT_FAMILY = 'ctp-default';
+export const DEFAULT_BOLD_FONT_FAMILY = 'ctp-default-bold';
 
 export function mmToScreenPx(mm: number): number {
   return mm * SCREEN_PX_PER_MM;
 }
 
-function screenPxToMm(px: number): number {
-  return Math.round(px / SCREEN_PX_PER_MM);
+function screenPxToRoundedMm(px: number): number {
+  return Math.round(px / SCREEN_PX_PER_MM / DRAG_ROUNDING_MM) * DRAG_ROUNDING_MM;
 }
 
 /**
- * Zeigt Beispieldaten statt echter Personendaten — die pixel-genaue Vorschau
- * mit echten Testdaten liefert die `LivePreview`-Komponente (echter
- * Server-Renderer), siehe Plan "WYSIWYG-Vorschau ... muss den echten
- * Renderer aufrufen, nicht in JS nachbauen". Dieser Canvas dient nur der
- * Positionierung per Drag & Drop.
+ * CSS-Schriftangabe wie im Renderer: Die mitgelieferte Druckschrift hat eine
+ * eigene Bold-Familie, nur bei eigenen Schriften wird „bold" vorangestellt.
  */
-function resolveDraftText(el: Extract<LabelElement, { type: 'text' | 'static' }>, variables: VariableDefs): string {
-  if (el.type === 'static') return el.value;
-  if (el.field === 'checkin.extra') {
-    return variables.textFields.find((f) => f.path === 'checkin.extra')?.example ?? 'Weitere Felder';
-  }
-  const example = variables.textFields.find((f) => f.path === el.field)?.example ?? '';
-  return `${el.prefix ?? ''}${example}`;
+export function cssFont(sizePx: number, bold: boolean, family: string): string {
+  const isDefault = family === DEFAULT_FONT_FAMILY || family === DEFAULT_BOLD_FONT_FAMILY;
+  return `${bold && !isDefault ? 'bold ' : ''}${sizePx}px "${family}"`;
 }
 
-/** Lokale (zur Gruppe relative) x/width, damit Konvas Box-Alignment das canvas-artige Anker-Verhalten von `align` nachbildet. */
-function textBoxProps(align: Align, boxWidth: number): { x: number; width: number } {
-  if (align === 'left') return { x: 0, width: boxWidth };
-  if (align === 'right') return { x: -boxWidth, width: boxWidth };
-  return { x: -boxWidth / 2, width: boxWidth };
-}
-
-interface ElementBox {
-  el: LabelElement;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+/** Trefferkasten in Bildschirm-px; zu dünne Kästen werden symmetrisch auf `MIN_HIT_SIZE_MM` gepolstert. */
+function hitRectPx(box: BoxMm): BoxMm {
+  const padX = Math.max(0, MIN_HIT_SIZE_MM - box.width) / 2;
+  const padY = Math.max(0, MIN_HIT_SIZE_MM - box.height) / 2;
+  return {
+    x: mmToScreenPx(box.x - padX),
+    y: mmToScreenPx(box.y - padY),
+    width: mmToScreenPx(box.width + 2 * padX),
+    height: mmToScreenPx(box.height + 2 * padY),
+  };
 }
 
 /**
- * Absolute Bildschirm-Pixel-Trefferzone je Element — Basis für die eigene
- * Klick-/Drag-Erkennung (siehe `pickElementAt`/`handlePointerDown` unten).
+ * Oberstes (zuletzt gezeichnetes) Element unter dem Punkt gewinnt, wie bei normalem DOM-Stacking.
  *
  * Bewusst NICHT über Konvas eingebaute Treffer-Erkennung gelöst: die
  * ermittelt per Definition, welche Form getroffen wurde, indem sie jede Form
@@ -61,88 +54,69 @@ interface ElementBox {
  * (uBlock/Brave Shields/"Canvas Blocker" u.ä.) verfälscht genau diese
  * Pixel-Auslese gezielt — mit dem Ergebnis, dass Konva nie eine Form trifft:
  * Klicks/Drags auf dem Editor-Canvas taten dann komplett nichts, ganz ohne
- * Fehler in der Konsole. Diese eigene, geometrische Prüfung ist von
- * Canvas-Pixel-Auslese unabhängig und funktioniert deshalb auch mit
- * aktiviertem Schutz.
- *
- * Berücksichtigt Drehung, indem die lokale (Anker-relative) Box in alle 4
- * Ecken zerlegt, jede Ecke gemäss `rotate` abgebildet und dann die
- * Bildschirm-achsenparallele Hülle gebildet wird — bei Vielfachen von 90°
- * ist das exakt (keine Näherung), weil die gedrehte Form selbst wieder
- * achsenparallel ist.
+ * Fehler in der Konsole. Diese eigene, geometrische Prüfung über die Kästen
+ * aus `geometry.ts` ist von Canvas-Pixel-Auslese unabhängig und funktioniert
+ * deshalb auch mit aktiviertem Schutz.
  */
-function computeBoxes(elements: LabelElement[], widthPx: number, dpi: number): ElementBox[] {
-  return elements.map((el) => {
-    const anchorX = mmToScreenPx(el.xMm);
-    const anchorY = mmToScreenPx(el.yMm);
-
-    let localX = 0;
-    let localY = 0;
-    let width = 0;
-    let height = 0;
-    if (el.type === 'text' || el.type === 'static') {
-      const box = textBoxProps(el.align, widthPx);
-      const fontPx = (el.fontSize / dpi) * 25.4 * SCREEN_PX_PER_MM;
-      localX = box.x;
-      width = box.width;
-      height = fontPx * TEXT_LINE_HEIGHT_FACTOR;
-    } else if (el.type === 'logo') {
-      width = height = mmToScreenPx(el.heightMm);
-    } else if (el.type === 'qr') {
-      width = height = mmToScreenPx(el.sizeMm);
-    } else {
-      width = mmToScreenPx(el.widthMm);
-      height = Math.max(mmToScreenPx(el.thicknessMm), 8);
-    }
-
-    const corners = [
-      rotateLocal(localX, localY, el.rotate),
-      rotateLocal(localX + width, localY, el.rotate),
-      rotateLocal(localX, localY + height, el.rotate),
-      rotateLocal(localX + width, localY + height, el.rotate),
-    ];
-    const xs = corners.map((c) => anchorX + c.x);
-    const ys = corners.map((c) => anchorY + c.y);
-    const minX = Math.min(...xs);
-    const minY = Math.min(...ys);
-    return { el, x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
-  });
-}
-
-/** Oberstes (zuletzt gezeichnetes) Element unter dem Punkt gewinnt, wie bei normalem DOM-Stacking. */
-function pickElementAt(boxes: ElementBox[], x: number, y: number): LabelElement | null {
-  for (let i = boxes.length - 1; i >= 0; i--) {
-    const box = boxes[i]!;
-    if (x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) return box.el;
+function pickElementAt(elements: LabelElement[], boxes: BoxMm[], x: number, y: number): LabelElement | null {
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const box = boxes[i];
+    if (!box) continue;
+    const hit = hitRectPx(box);
+    if (x >= hit.x && x <= hit.x + hit.width && y >= hit.y && y <= hit.y + hit.height) return elements[i]!;
   }
   return null;
 }
 
+/**
+ * Text wie im Renderer: Anker oben, `textAlign` gemäss `align`, jede weitere
+ * Zeile `fontSize × LINE_HEIGHT_FACTOR` tiefer. Konvas `Text` zentriert die
+ * Glyphen stattdessen in der Zeilenhöhe und stünde damit sichtbar tiefer als
+ * im Druck; ein eigenes `'top'` deutet der Browser anders als der Renderer
+ * (siehe fontMetrics.ts). Deshalb ab der Grundlinie, deren Lage aus der
+ * Schriftdatei stammt — solange sie fehlt, mit der Browser-Deutung von 'top'.
+ */
+function DraftText({ el, ctx, fill, baselineRatio }: { el: TextLikeElement; ctx: BoxContext; fill: string; baselineRatio: number | undefined }) {
+  const lines = ctx.resolveText(el).split('\n');
+  const sizePx = mmToScreenPx((el.fontSize * 25.4) / ctx.dpi);
+  const font = cssFont(sizePx, el.bold, ctx.fontFamily(el));
+  const firstLineY = baselineRatio === undefined ? 0 : baselineRatio * sizePx;
+  return (
+    <Shape
+      sceneFunc={(context) => {
+        context.setAttr('font', font);
+        context.setAttr('textAlign', el.align);
+        context.setAttr('textBaseline', baselineRatio === undefined ? 'top' : 'alphabetic');
+        context.setAttr('fillStyle', fill);
+        lines.forEach((line, i) => context.fillText(line, 0, firstLineY + i * sizePx * LINE_HEIGHT_FACTOR));
+      }}
+    />
+  );
+}
+
 interface Props {
-  media: MediaType | null;
+  area: PrintArea;
+  /** `boxes[i]` gehört zu `elements[i]`, in mm (siehe `elementBoxMm`). */
+  boxes: BoxMm[];
   elements: LabelElement[];
+  boxCtx: BoxContext;
+  /** Geladene Logo-Bilder je logoId; fehlt eines, erscheint ein Platzhalter. */
+  logoImages: Record<number, HTMLImageElement>;
+  /** Automatische Etikettenlänge bei Endlos ohne feste Länge, sonst `null`. */
+  autoLengthMm: number | null;
+  /** Anker→Grundlinie je Schriftfamilie als Anteil der Schriftgrösse. */
+  baselineRatios: Record<string, number>;
   selectedId: string | null;
-  variables: VariableDefs;
-  fontNameById: Record<number, string>;
   onSelect: (id: string | null) => void;
   onMove: (id: string, xMm: number, yMm: number) => void;
 }
 
-export function Canvas({ media, elements, selectedId, variables, fontNameById, onSelect, onMove: onMoveElement }: Props) {
-  const dpi = media ? VENDOR_DPI[media.vendor] : 300;
-  const widthMm = media?.widthMm ?? 60;
-  const heightMm = media?.heightMm ?? DEFAULT_CONTINUOUS_HEIGHT_MM;
-  const widthPx = mmToScreenPx(widthMm);
-  const heightPx = mmToScreenPx(heightMm);
-
-  function fontSizeToScreenPx(printPx: number): number {
-    return (printPx / dpi) * 25.4 * SCREEN_PX_PER_MM;
-  }
-
-  const boxes = useMemo(() => computeBoxes(elements, widthPx, dpi), [elements, widthPx, dpi]);
+export function Canvas({ area, boxes, elements, boxCtx, logoImages, autoLengthMm, baselineRatios, selectedId, onSelect, onMove: onMoveElement }: Props) {
+  const widthPx = mmToScreenPx(area.widthMm);
+  const heightPx = mmToScreenPx(area.heightMm);
 
   const stageRef = useRef<Konva.Stage | null>(null);
-  // Live-Position während des Ziehens, unquantisiert für flüssiges Gefühl — erst beim Loslassen auf ganze mm gerundet (siehe finishDrag).
+  // Live-Position während des Ziehens, unquantisiert für flüssiges Gefühl — erst beim Loslassen gerundet (siehe finishDrag).
   const [dragPreview, setDragPreview] = useState<{ id: string; xPx: number; yPx: number } | null>(null);
   const previewRef = useRef<{ id: string; xPx: number; yPx: number } | null>(null);
   const detachRef = useRef<(() => void) | null>(null);
@@ -163,7 +137,7 @@ export function Canvas({ media, elements, selectedId, variables, fontNameById, o
     const stage = stageRef.current;
     const pos = stage?.getPointerPosition();
     if (!stage || !pos) return;
-    const hit = pickElementAt(boxes, pos.x, pos.y);
+    const hit = pickElementAt(elements, boxes, pos.x, pos.y);
     onSelect(hit?.id ?? null);
     if (!hit) return;
 
@@ -175,6 +149,7 @@ export function Canvas({ media, elements, selectedId, variables, fontNameById, o
 
     const onMove = (event: PointerEvent) => {
       const rect = stage.container().getBoundingClientRect();
+      // Der Anker bleibt auf der Fläche.
       const xPx = Math.min(Math.max(0, event.clientX - rect.left - offsetXPx), widthPx);
       const yPx = Math.min(Math.max(0, event.clientY - rect.top - offsetYPx), heightPx);
       previewRef.current = { id, xPx, yPx };
@@ -186,7 +161,7 @@ export function Canvas({ media, elements, selectedId, variables, fontNameById, o
       previewRef.current = null;
       setDragPreview(null);
       setCursor('grab');
-      if (preview) onMoveElement(preview.id, screenPxToMm(preview.xPx), screenPxToMm(preview.yPx));
+      if (preview) onMoveElement(preview.id, screenPxToRoundedMm(preview.xPx), screenPxToRoundedMm(preview.yPx));
     };
     const detach = () => {
       window.removeEventListener('pointermove', onMove);
@@ -206,23 +181,20 @@ export function Canvas({ media, elements, selectedId, variables, fontNameById, o
     if (detachRef.current) return;
     const pos = stageRef.current?.getPointerPosition();
     if (!pos) return;
-    setCursor(pickElementAt(boxes, pos.x, pos.y) ? 'grab' : 'default');
+    setCursor(pickElementAt(elements, boxes, pos.x, pos.y) ? 'grab' : 'default');
   }
+
+  const autoLengthPx = autoLengthMm !== null ? mmToScreenPx(autoLengthMm) : null;
 
   return (
     <div className="paper">
-      <Stage
-        ref={stageRef}
-        width={widthPx}
-        height={heightPx}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handleHover}
-      >
+      <Stage ref={stageRef} width={Math.ceil(widthPx)} height={Math.ceil(heightPx)} onPointerDown={handlePointerDown} onPointerMove={handleHover}>
         <Layer listening={false}>
           <Rect x={0} y={0} width={widthPx} height={heightPx} fill="white" stroke="#e4e1da" />
           {elements.map((el) => {
             const isSelected = el.id === selectedId;
             const strokeColor = isSelected ? '#2b6e63' : '#c9c5ba';
+            const inkColor = isSelected ? '#2b6e63' : '#1c1b19';
             const isDragging = dragPreview?.id === el.id;
             const x = isDragging ? dragPreview.xPx : mmToScreenPx(el.xMm);
             const y = isDragging ? dragPreview.yPx : mmToScreenPx(el.yMm);
@@ -231,25 +203,24 @@ export function Canvas({ media, elements, selectedId, variables, fontNameById, o
             const groupProps = { x, y, rotation: Number(el.rotate ?? '0'), opacity: isDragging ? 0.75 : 1 };
 
             if (el.type === 'text' || el.type === 'static') {
-              const box = textBoxProps(el.align, widthPx);
               return (
                 <Group key={el.id} {...groupProps}>
-                  <Text
-                    x={box.x}
-                    y={0}
-                    width={box.width}
-                    align={el.align}
-                    text={resolveDraftText(el, variables)}
-                    fontSize={fontSizeToScreenPx(el.fontSize)}
-                    fontStyle={el.bold ? 'bold' : 'normal'}
-                    fontFamily={(el.fontId !== undefined && fontNameById[el.fontId]) || 'Work Sans'}
-                    fill={isSelected ? '#2b6e63' : '#1c1b19'}
-                  />
+                  <DraftText el={el} ctx={boxCtx} fill={inkColor} baselineRatio={baselineRatios[boxCtx.fontFamily(el)]} />
                 </Group>
               );
             }
             if (el.type === 'logo') {
               const h = mmToScreenPx(el.heightMm);
+              const image = logoImages[el.logoId];
+              if (image) {
+                const w = h * (image.naturalWidth / image.naturalHeight);
+                return (
+                  <Group key={el.id} {...groupProps}>
+                    <KonvaImage image={image} width={w} height={h} />
+                    {isSelected && <Rect width={w} height={h} stroke={strokeColor} dash={[4, 3]} />}
+                  </Group>
+                );
+              }
               return (
                 <Group key={el.id} {...groupProps}>
                   <Rect width={h} height={h} fill="#f2f1ec" stroke={strokeColor} dash={[4, 3]} />
@@ -266,16 +237,23 @@ export function Canvas({ media, elements, selectedId, variables, fontNameById, o
                 </Group>
               );
             }
-            // line
-            const w = mmToScreenPx(el.widthMm);
-            const t = Math.max(1, mmToScreenPx(el.thicknessMm));
+            // Linie: wie im Renderer ab dem Anker nach unten, mindestens 1 Druck-px dick.
             return (
               <Group key={el.id} {...groupProps}>
-                <Rect width={w} height={Math.max(t, 8)} fill="transparent" />
-                <Rect y={Math.max(t, 8) / 2 - t / 2} width={w} height={t} fill={isSelected ? '#2b6e63' : '#1c1b19'} />
+                <Rect
+                  width={mmToScreenPx(el.widthMm)}
+                  height={mmToScreenPx(Math.max(el.thicknessMm, 25.4 / boxCtx.dpi))}
+                  fill={inkColor}
+                />
               </Group>
             );
           })}
+          {autoLengthPx !== null && autoLengthPx <= heightPx && (
+            <Group y={autoLengthPx}>
+              <Line points={[0, 0, widthPx, 0]} stroke="#b0573c" strokeWidth={1} dash={[6, 4]} />
+              <Text x={4} y={3} text="Etikett endet hier (automatisch)" fontSize={10} fill="#b0573c" />
+            </Group>
+          )}
         </Layer>
       </Stage>
     </div>

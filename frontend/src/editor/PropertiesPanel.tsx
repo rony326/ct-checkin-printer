@@ -193,7 +193,7 @@ function UploadLink({ label, accept, onFile }: { label: string; accept: string; 
   );
 }
 
-function elementTypeLabel(type: LabelElement['type']): string {
+export function elementTypeLabel(type: LabelElement['type']): string {
   switch (type) {
     case 'text':
       return 'Textfeld';

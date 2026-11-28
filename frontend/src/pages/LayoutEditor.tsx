@@ -1,11 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, postForBlob, uploadFile } from '../api/client.js';
-import { Canvas } from '../editor/Canvas.js';
-import { DEFAULT_CONTINUOUS_HEIGHT_MM } from '../editor/geometry.js';
-import { PropertiesPanel } from '../editor/PropertiesPanel.js';
+import { Canvas, DEFAULT_BOLD_FONT_FAMILY, DEFAULT_FONT_FAMILY, cssFont } from '../editor/Canvas.js';
+import {
+  DEFAULT_CONTINUOUS_HEIGHT_MM,
+  elementBoxMm,
+  estimateContentLengthMm,
+  overflowingElementIds,
+  printAreaMm,
+  type BoxContext,
+  type BoxMm,
+  type MeasureText,
+  type PrintArea,
+  type TextLikeElement,
+} from '../editor/geometry.js';
+import { topBaselineRatio } from '../editor/fontMetrics.js';
+import { PropertiesPanel, elementTypeLabel } from '../editor/PropertiesPanel.js';
 import { Toolbar } from '../editor/Toolbar.js';
 import type { FontEntry, LabelElement, LabelElementType, LabelLayout, LogoEntry, MediaType, VariableDefs } from '../types.js';
+import { VENDOR_DPI } from '../types.js';
 import { useFieldId } from '../components/useFieldId.js';
 
 /**
@@ -44,16 +57,112 @@ function snapshotOf(elements: LabelElement[], mediaId: number | null): string {
   return JSON.stringify({ elements, mediaId });
 }
 
-/** Registriert hochgeladene Fonts als @font-face, damit der interaktive Editor-Canvas dieselbe Schrift wie der echte Druck zeigt. */
-function useFontFaces(fonts: FontEntry[]) {
+/** Arbeitsfläche, solange kein Medium bekannt ist. */
+const FALLBACK_AREA: PrintArea = { widthMm: 60, heightMm: DEFAULT_CONTINUOUS_HEIGHT_MM, continuous: true, fixedLength: false };
+
+interface FontFaces {
+  /** Steigt, sobald Schriften geladen sind — Textbreiten müssen dann neu gemessen werden. */
+  fontsVersion: number;
+  /** Anker→Grundlinie je Familie, siehe `topBaselineRatio`. */
+  baselineRatios: Record<string, number>;
+}
+
+/**
+ * Lädt die Druckschrift und die hochgeladenen Fonts als FontFace, damit der
+ * Editor-Canvas dieselbe Schrift wie der echte Druck zeigt, und liest aus
+ * denselben Dateien die senkrechte Lage, die der Renderer verwendet.
+ */
+function useFontFaces(fonts: FontEntry[]): FontFaces {
+  const [state, setState] = useState<FontFaces>({ fontsVersion: 0, baselineRatios: {} });
+  const downloadsRef = useRef(new Map<string, Promise<ArrayBuffer>>());
   useEffect(() => {
-    const styleEl = document.createElement('style');
-    styleEl.textContent = fonts.map((f) => `@font-face { font-family: 'font-${f.id}'; src: url('/api/fonts/${f.id}/file'); }`).join('\n');
-    document.head.appendChild(styleEl);
+    const sources = [
+      { family: DEFAULT_FONT_FAMILY, url: '/api/fonts/default/regular' },
+      { family: DEFAULT_BOLD_FONT_FAMILY, url: '/api/fonts/default/bold' },
+      ...fonts.map((f) => ({ family: `font-${f.id}`, url: `/api/fonts/${f.id}/file` })),
+    ];
+    let cancelled = false;
+    const added: FontFace[] = [];
+    // Auch bei einer fehlerhaften Schrift weiter: die übrigen sind dann trotzdem geladen.
+    void Promise.allSettled(
+      sources.map(async ({ family, url }) => {
+        let download = downloadsRef.current.get(url);
+        if (!download) {
+          download = fetch(url).then((res) => {
+            if (!res.ok) throw new Error(`${url}: ${res.status}`);
+            return res.arrayBuffer();
+          });
+          download.catch(() => downloadsRef.current.delete(url));
+          downloadsRef.current.set(url, download);
+        }
+        const buffer = await download;
+        const face = await new FontFace(family, buffer).load();
+        if (cancelled) return null;
+        document.fonts.add(face);
+        added.push(face);
+        return { family, ratio: topBaselineRatio(buffer) };
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      const baselineRatios: Record<string, number> = {};
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value && result.value.ratio !== null) {
+          baselineRatios[result.value.family] = result.value.ratio;
+        }
+      }
+      setState((prev) => ({ fontsVersion: prev.fontsVersion + 1, baselineRatios }));
+    });
     return () => {
-      document.head.removeChild(styleEl);
+      cancelled = true;
+      for (const face of added) document.fonts.delete(face);
     };
   }, [fonts]);
+  return state;
+}
+
+/** Lädt die Bilder der verwendeten Logos; fertig geladene erscheinen im Ergebnis. */
+function useLogoImages(elements: LabelElement[], logos: LogoEntry[]): Record<number, HTMLImageElement> {
+  const [images, setImages] = useState<Record<number, HTMLImageElement>>({});
+  const requestedRef = useRef(new Set<number>());
+  const knownIds = new Set(logos.map((l) => l.id));
+  const wantedKey = [...new Set(elements.flatMap((el) => (el.type === 'logo' && knownIds.has(el.logoId) ? [el.logoId] : [])))]
+    .sort((a, b) => a - b)
+    .join(',');
+  useEffect(() => {
+    if (!wantedKey) return;
+    for (const logoId of wantedKey.split(',').map(Number)) {
+      if (requestedRef.current.has(logoId)) continue;
+      requestedRef.current.add(logoId);
+      const img = new window.Image();
+      img.onload = () => setImages((prev) => ({ ...prev, [logoId]: img }));
+      img.onerror = () => requestedRef.current.delete(logoId);
+      img.src = `/api/logos/${logoId}/file`;
+    }
+  }, [wantedKey]);
+  return images;
+}
+
+/** Misst Textbreiten in Druck-px mit derselben Schriftangabe wie der Canvas. */
+function createMeasure(): MeasureText {
+  const ctx = document.createElement('canvas').getContext('2d');
+  return (text, fontSizePx, bold, fontFamily) => {
+    if (!ctx) return text.length * fontSizePx * 0.55;
+    ctx.font = cssFont(fontSizePx, bold, fontFamily);
+    return ctx.measureText(text).width;
+  };
+}
+
+/**
+ * Zeigt Beispieldaten statt echter Personendaten — die pixel-genaue Vorschau
+ * mit echten Testdaten liefert der Server-Renderer daneben.
+ */
+function resolveDraftText(el: TextLikeElement, variables: VariableDefs): string {
+  if (el.type === 'static') return el.value;
+  if (el.field === 'checkin.extra') {
+    return variables.textFields.find((f) => f.path === 'checkin.extra')?.example ?? 'Weitere Felder';
+  }
+  const example = variables.textFields.find((f) => f.path === el.field)?.example ?? '';
+  return `${el.prefix ?? ''}${example}`;
 }
 
 export function LayoutEditor() {
@@ -76,7 +185,8 @@ export function LayoutEditor() {
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
   const previewUrlRef = useRef<string | null>(null);
 
-  useFontFaces(fonts);
+  const { fontsVersion, baselineRatios } = useFontFaces(fonts);
+  const logoImages = useLogoImages(elements, logos);
 
   async function loadAll() {
     let results;
@@ -110,6 +220,40 @@ export function LayoutEditor() {
 
   const media = useMemo(() => mediaTypes.find((m) => m.id === mediaId) ?? null, [mediaTypes, mediaId]);
   const selectedElement = useMemo(() => elements.find((el) => el.id === selectedId) ?? null, [elements, selectedId]);
+  const lengthMm = layout?.lengthMm ?? null;
+  const area = useMemo(() => (media ? printAreaMm(media, lengthMm) : FALLBACK_AREA), [media, lengthMm]);
+
+  // Neu nach jedem Schriften-Laden, damit alle abhängigen Kästen neu gemessen werden.
+  const measure = useMemo(() => createMeasure(), [fontsVersion]);
+  const boxCtx = useMemo<BoxContext>(() => {
+    const fontIds = new Set(fonts.map((f) => f.id));
+    return {
+      dpi: media ? VENDOR_DPI[media.vendor] : 300,
+      resolveText: (el) => resolveDraftText(el, variables),
+      // Wie der Renderer: eigene Schrift, sonst die mitgelieferte Druckschrift in Regular bzw. Bold.
+      fontFamily: (el) =>
+        el.fontId !== undefined && fontIds.has(el.fontId) ? `font-${el.fontId}` : el.bold ? DEFAULT_BOLD_FONT_FAMILY : DEFAULT_FONT_FAMILY,
+      measure,
+      logoAspect: (logoId) => {
+        const img = logoImages[logoId];
+        return img && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : undefined;
+      },
+    };
+  }, [media, variables, fonts, measure, logoImages]);
+  const boxes = useMemo<BoxMm[]>(() => elements.map((el) => elementBoxMm(el, boxCtx)), [elements, boxCtx]);
+  // Der Renderer ignoriert bei der automatischen Länge die Drehung.
+  const autoLengthMm = useMemo(
+    () =>
+      area.continuous && !area.fixedLength
+        ? estimateContentLengthMm(elements.map((el) => elementBoxMm({ ...el, rotate: '0' }, boxCtx)))
+        : null,
+    [area, elements, boxCtx],
+  );
+  const overflowLabels = useMemo(() => {
+    const ids = new Set(overflowingElementIds(elements, boxes, area));
+    return elements.filter((el) => ids.has(el.id)).map((el) => elementTypeLabel(el.type));
+  }, [elements, boxes, area]);
+
   const isDirty = savedSnapshot !== null && snapshotOf(elements, mediaId) !== savedSnapshot;
 
   // Ein altes „Gespeichert." darf nach weiteren Änderungen nicht stehen bleiben.
@@ -138,9 +282,9 @@ export function LayoutEditor() {
       const move = delta[event.key];
       if (!move) return;
       event.preventDefault();
-      // Gleiche Grenzen wie beim Ziehen (siehe Canvas): innerhalb des Etiketts bleiben.
-      const maxX = media?.widthMm ?? Infinity;
-      const maxY = media?.heightMm ?? DEFAULT_CONTINUOUS_HEIGHT_MM;
+      // Gleiche Grenzen wie beim Ziehen (siehe Canvas): der Anker bleibt auf der Fläche.
+      const maxX = area.widthMm;
+      const maxY = area.heightMm;
       const clamp = (v: number, max: number) => Math.min(Math.max(0, v), max);
       setElements((prev) =>
         prev.map((el) => (el.id === selectedId ? { ...el, xMm: clamp(el.xMm + move[0], maxX), yMm: clamp(el.yMm + move[1], maxY) } : el)),
@@ -148,9 +292,7 @@ export function LayoutEditor() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedId, media]);
-
-  const fontNameById = useMemo(() => Object.fromEntries(fonts.map((f) => [f.id, `font-${f.id}`])), [fonts]);
+  }, [selectedId, area]);
 
   // Live-Vorschau: echter Server-Renderer, debounced bei jeder Änderung.
   useEffect(() => {
@@ -160,7 +302,7 @@ export function LayoutEditor() {
     }
     const timer = setTimeout(async () => {
       try {
-        const blob = await postForBlob('/api/label-layouts/preview', { elements, mediaId });
+        const blob = await postForBlob('/api/label-layouts/preview', { elements, mediaId, lengthMm });
         const url = URL.createObjectURL(blob);
         if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
         previewUrlRef.current = url;
@@ -171,7 +313,7 @@ export function LayoutEditor() {
       }
     }, 400);
     return () => clearTimeout(timer);
-  }, [elements, mediaId]);
+  }, [elements, mediaId, lengthMm]);
 
   useEffect(() => {
     return () => {
@@ -309,12 +451,20 @@ export function LayoutEditor() {
               <p className="hint" style={{ textAlign: 'center', marginBottom: '0.5rem' }}>
                 Entwurf — ziehen oder mit Pfeiltasten verschieben (Shift = 5 mm)
               </p>
+              {overflowLabels.length > 0 && (
+                <p className="error-text" role="status" style={{ textAlign: 'center', marginBottom: '0.5rem' }}>
+                  Ragt über das Etikett hinaus und wird abgeschnitten: {overflowLabels.join(', ')}
+                </p>
+              )}
               <Canvas
-                media={media}
+                area={area}
+                boxes={boxes}
                 elements={elements}
+                boxCtx={boxCtx}
+                logoImages={logoImages}
+                autoLengthMm={autoLengthMm}
+                baselineRatios={baselineRatios}
                 selectedId={selectedId}
-                variables={variables}
-                fontNameById={fontNameById}
                 onSelect={setSelectedId}
                 onMove={moveElement}
               />

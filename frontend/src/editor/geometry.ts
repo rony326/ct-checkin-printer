@@ -56,7 +56,9 @@ export function printAreaMm(media: MediaType, lengthMm: number | null): PrintAre
     const heightMm = media.printableHeightMm ?? media.heightMm ?? DEFAULT_CONTINUOUS_HEIGHT_MM;
     return { widthMm: media.printableWidthMm, heightMm, continuous: false, fixedLength: false };
   }
-  return { widthMm: media.widthMm, heightMm: lengthMm ?? DEFAULT_CONTINUOUS_HEIGHT_MM, continuous: true, fixedLength: lengthMm !== null };
+  if (lengthMm === null) return { widthMm: media.widthMm, heightMm: DEFAULT_CONTINUOUS_HEIGHT_MM, continuous: true, fixedLength: false };
+  // Der Renderer druckt nie kürzer als MIN_LENGTH_MM.
+  return { widthMm: media.widthMm, heightMm: Math.max(lengthMm, MIN_LENGTH_MM), continuous: true, fixedLength: true };
 }
 
 /** Bildet einen zum Anker relativen Punkt gemäss Drehung ab (im Uhrzeigersinn, wie Konvas `rotation`-Prop). */

@@ -79,6 +79,10 @@ describe('printAreaMm', () => {
   it('nimmt bei Endlos die feste Länge', () => {
     expect(printAreaMm(continuousMedia, 80)).toEqual({ widthMm: 62, heightMm: 80, continuous: true, fixedLength: true });
   });
+
+  it('hebt eine zu kurze feste Länge auf die Mindestlänge an, wie der Renderer', () => {
+    expect(printAreaMm(continuousMedia, 4)).toEqual({ widthMm: 62, heightMm: 10, continuous: true, fixedLength: true });
+  });
 });
 
 describe('rotateLocal', () => {
